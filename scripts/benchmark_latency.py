@@ -14,6 +14,7 @@ Usage:
 
 import argparse
 import gc
+import glob
 import logging
 import os
 import time
@@ -98,11 +99,13 @@ def benchmark_model(model_name, output_dir, n_runs=50):
         logger.info("Exporting to CoreML FP32...")
         mlpackage_path = export_to_coreml(model_name, output_dir, "fp32")
 
-    # Test image
-    rng = np.random.RandomState(42)
-    img_uint8 = rng.randint(0, 256, (resolution, resolution, 3), dtype=np.uint8)
-    pil_img = Image.fromarray(img_uint8)
-    pt_input = torch.from_numpy(img_uint8).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+    # Real test image (same as all other scripts)
+    test_img_path = sorted(glob.glob(os.path.join(os.path.dirname(__file__), "test_images", "*.jpg")))[0]
+    pil_img = Image.open(test_img_path).convert("RGB").resize(
+        (resolution, resolution), Image.BILINEAR
+    )
+    img_np = np.array(pil_img)
+    pt_input = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
     coreml_input = {"image": pil_img}
 
     result = {"model": model_name}
@@ -130,7 +133,7 @@ def benchmark_model(model_name, output_dir, n_runs=50):
     del wrapped, pt_model
     gc.collect()
 
-    # CoreML — three compute unit modes
+    # CoreML — three compute unit modes (load one at a time to avoid EP conflicts)
     for label, cu in [
         ("ALL", ct.ComputeUnit.ALL),
         ("CPU_AND_NE", ct.ComputeUnit.CPU_AND_NE),
@@ -142,8 +145,7 @@ def benchmark_model(model_name, output_dir, n_runs=50):
         result[f"coreml_{label.lower()}"] = s["median"]
         logger.info(f"  Median: {s['median']:.1f} ms")
         del ml_model
-
-    gc.collect()
+        gc.collect()
     return result
 
 

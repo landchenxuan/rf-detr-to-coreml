@@ -8,6 +8,10 @@ For each selected model:
   3. Compare outputs (boxes, logits, and masks for segmentation models)
   4. Report accuracy diff and latency
 
+Uses real test images (scripts/test_images/*.jpg) for robust accuracy measurement.
+Box diff is measured only among confident queries (max logit > 0) to avoid
+noise from junk queries. Reports max diff across all images.
+
 Usage:
   python scripts/test_export.py                    # Test all models
   python scripts/test_export.py --model nano       # Test single model
@@ -16,6 +20,7 @@ Usage:
 """
 
 import argparse
+import glob
 import logging
 import os
 import time
@@ -37,6 +42,16 @@ logger = logging.getLogger(__name__)
 
 DETECTION_MODELS = [k for k in MODEL_REGISTRY if not k.startswith("seg-")]
 SEGMENTATION_MODELS = [k for k in MODEL_REGISTRY if k.startswith("seg-")]
+
+TEST_IMAGES_DIR = os.path.join(os.path.dirname(__file__), "test_images")
+
+
+def load_test_images():
+    """Load all test images from scripts/test_images/."""
+    paths = sorted(glob.glob(os.path.join(TEST_IMAGES_DIR, "*.jpg")))
+    if not paths:
+        raise FileNotFoundError(f"No test images found in {TEST_IMAGES_DIR}")
+    return paths
 
 
 def build_pytorch_model(model_name):
@@ -66,7 +81,7 @@ def identify_coreml_outputs(result):
 
 
 def test_model(model_name, output_dir, skip_export=False):
-    """Export one model and compare CoreML vs PyTorch outputs."""
+    """Export one model and compare CoreML vs PyTorch outputs across all test images."""
     import coremltools as ct
     from PIL import Image
 
@@ -95,60 +110,88 @@ def test_model(model_name, output_dir, skip_export=False):
     )
     size_mb = total_size / (1024 * 1024)
 
-    # Create test image (uint8 so both paths get identical input)
-    rng = np.random.RandomState(42)
-    img_uint8 = rng.randint(0, 256, (resolution, resolution, 3), dtype=np.uint8)
-    pil_img = Image.fromarray(img_uint8)
-    pt_input = torch.from_numpy(img_uint8).permute(2, 0, 1).unsqueeze(0).float() / 255.0
-
-    # PyTorch inference
-    logger.info("Running PyTorch inference...")
+    # Build models
+    logger.info("Loading PyTorch model...")
     wrapped_pt = build_pytorch_model(model_name)
-    with torch.no_grad():
-        pt_out = wrapped_pt(pt_input)
-    pt_boxes = pt_out[0].numpy()
-    pt_logits = pt_out[1].numpy()
-    pt_masks = pt_out[2].numpy() if len(pt_out) > 2 else None
-    del wrapped_pt
-
-    # CoreML inference (ALL compute units)
-    logger.info("Running CoreML inference (ALL)...")
     ml_model = ct.models.MLModel(mlpackage_path, compute_units=ct.ComputeUnit.ALL)
-    for _ in range(3):
-        ml_model.predict({"image": pil_img})
-    n_runs = 20
-    t0 = time.time()
-    for _ in range(n_runs):
-        result = ml_model.predict({"image": pil_img})
-    latency_all = (time.time() - t0) / n_runs * 1000
 
-    cm_boxes, cm_logits, cm_masks = identify_coreml_outputs(result)
-    del ml_model
+    # Test across all images
+    test_paths = load_test_images()
+    logger.info(f"Testing with {len(test_paths)} images...")
 
-    # Compare
-    box_diff = np.abs(pt_boxes - cm_boxes).max() if cm_boxes is not None else None
-    logit_diff = np.abs(pt_logits - cm_logits).max() if cm_logits is not None else None
-    mask_diff = None
-    if is_seg and cm_masks is not None and pt_masks is not None:
-        mask_diff = np.abs(pt_masks - cm_masks).max()
+    max_box_diff_px = 0.0
+    max_mask_diff = 0.0
+    total_confident = 0
+    latency_times = []
 
+    for img_path in test_paths:
+        pil_img = Image.open(img_path).convert("RGB").resize(
+            (resolution, resolution), Image.BILINEAR
+        )
+        img_np = np.array(pil_img)
+        pt_input = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+
+        # PyTorch inference
+        with torch.no_grad():
+            pt_out = wrapped_pt(pt_input)
+        pt_boxes = pt_out[0].numpy()[0]   # (300, 4)
+        pt_logits = pt_out[1].numpy()[0]  # (300, num_classes)
+        pt_masks = pt_out[2].numpy()[0] if len(pt_out) > 2 else None  # (300, H, W)
+
+        # CoreML inference
+        for _ in range(2):
+            ml_model.predict({"image": pil_img})
+        n_runs = 10
+        t0 = time.time()
+        for _ in range(n_runs):
+            result = ml_model.predict({"image": pil_img})
+        latency_times.append((time.time() - t0) / n_runs * 1000)
+
+        cm_boxes, cm_logits, cm_masks = identify_coreml_outputs(result)
+        cm_boxes = cm_boxes[0] if cm_boxes is not None else None       # (300, 4)
+        cm_logits = cm_logits[0] if cm_logits is not None else None    # (300, num_classes)
+        cm_masks = cm_masks[0] if cm_masks is not None else None       # (300, H, W)
+
+        # Box diff: only among confident queries (max logit > 0 = sigmoid > 0.5)
+        confident = pt_logits.max(axis=1) > 0
+        n_conf = int(confident.sum())
+        total_confident += n_conf
+
+        if n_conf > 0 and cm_boxes is not None:
+            bd = float(np.abs(pt_boxes[confident] - cm_boxes[confident]).max()) * resolution
+            max_box_diff_px = max(max_box_diff_px, bd)
+        else:
+            bd = 0.0
+
+        # Mask diff: also only among confident queries
+        if is_seg and cm_masks is not None and pt_masks is not None and n_conf > 0:
+            md = float(np.abs(pt_masks[confident] - cm_masks[confident]).max())
+            max_mask_diff = max(max_mask_diff, md)
+        else:
+            md = 0.0
+
+        logger.info(f"  {os.path.basename(img_path)}: {n_conf} detections, "
+                     f"box={bd:.2f}px"
+                     + (f" mask={md:.4f}" if is_seg else ""))
+
+    del wrapped_pt, ml_model
+
+    latency_all = float(np.median(latency_times))
     logger.info(f"  Size: {size_mb:.1f} MB")
-    logger.info(f"  Latency (ALL): {latency_all:.1f} ms")
-    if box_diff is not None:
-        logger.info(f"  Max box diff: {box_diff:.6f}")
-    if logit_diff is not None:
-        logger.info(f"  Max logit diff: {logit_diff:.6f}")
-    if mask_diff is not None:
-        logger.info(f"  Max mask diff: {mask_diff:.6f}")
+    logger.info(f"  Latency (ALL, median): {latency_all:.1f} ms")
+    logger.info(f"  Total confident detections: {total_confident}")
+    logger.info(f"  Max box diff: {max_box_diff_px:.2f} px")
+    if is_seg:
+        logger.info(f"  Max mask diff: {max_mask_diff:.6f}")
 
     return {
         "model": model_name,
         "type": "seg" if is_seg else "det",
         "size_mb": size_mb,
         "latency_all_ms": latency_all,
-        "box_diff": box_diff,
-        "logit_diff": logit_diff,
-        "mask_diff": mask_diff,
+        "box_diff_px": max_box_diff_px,
+        "mask_diff": max_mask_diff if is_seg else None,
+        "total_confident": total_confident,
     }
 
 
@@ -185,19 +228,20 @@ def main():
             results.append({"model": name, "error": str(e)})
 
     # Summary
-    print(f"\n{'=' * 80}")
-    print("SUMMARY")
-    print(f"{'=' * 80}")
-    print(f"{'Model':<14s} {'Size':>7s} {'ALL ms':>7s} {'Box Diff':>10s} {'Logit Diff':>11s} {'Mask Diff':>10s}")
-    print("-" * 80)
+    n_images = len(load_test_images())
+    print(f"\n{'=' * 85}")
+    print(f"SUMMARY ({n_images} test images, confident queries only)")
+    print(f"{'=' * 85}")
+    print(f"{'Model':<14s} {'Size':>7s} {'ALL ms':>7s} {'Detections':>11s} {'Box Diff':>12s} {'Mask Diff':>10s}")
+    print("-" * 85)
     for r in results:
         if "error" in r:
             print(f"{r['model']:<14s}  ERROR: {r['error'][:50]}")
         else:
-            bd = f"{r['box_diff']:.6f}" if r["box_diff"] is not None else "—"
-            ld = f"{r['logit_diff']:.6f}" if r["logit_diff"] is not None else "—"
-            md = f"{r['mask_diff']:.6f}" if r["mask_diff"] is not None else "—"
-            print(f"{r['model']:<14s} {r['size_mb']:>6.1f}M {r['latency_all_ms']:>6.1f} {bd:>10s} {ld:>11s} {md:>10s}")
+            bd = f"{r['box_diff_px']:.2f} px" if r["box_diff_px"] is not None else "—"
+            md = f"{r['mask_diff']:.4f}" if r["mask_diff"] is not None else "—"
+            print(f"{r['model']:<14s} {r['size_mb']:>6.1f}M {r['latency_all_ms']:>6.1f} "
+                  f"{r['total_confident']:>11d} {bd:>12s} {md:>10s}")
 
 
 if __name__ == "__main__":

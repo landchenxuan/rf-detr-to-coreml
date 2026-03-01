@@ -150,6 +150,89 @@ for (name, model) in models {
     print("   \(name): median=\(String(format: "%.1f", median))ms, P5-P95=[\(String(format: "%.1f", p5)), \(String(format: "%.1f", p95))]")
 }
 
+// Step 6: MLComputePlan analysis (macOS 14.4+ / iOS 17.4+)
+print()
+print("6. MLComputePlan analysis (per-op device assignment)...")
+
+if #available(macOS 14.4, iOS 17.4, *) {
+    let planConfig = MLModelConfiguration()
+    planConfig.computeUnits = .all
+
+    // MLComputePlan.load requires a compiled model URL and uses async/await
+    let semaphore = DispatchSemaphore(value: 0)
+    var cpuGpuCapable = 0
+    var aneCapable = 0
+    var noDevice = 0
+    var totalOps = 0
+    var planFailed = false
+
+    Task {
+        do {
+            let plan = try await MLComputePlan.load(contentsOf: compiledURL, configuration: planConfig)
+
+            // modelStructure is an enum — pattern match for .program
+            switch plan.modelStructure {
+            case .program(let program):
+                for (_, function) in program.functions {
+                    // Function has a single .block (not .blocks)
+                    for operation in function.block.operations {
+                        totalOps += 1
+                        if let usage = plan.deviceUsage(for: operation) {
+                            let supported = usage.supported
+                            let hasANE = supported.contains { device in
+                                if case .neuralEngine = device { return true }
+                                return false
+                            }
+                            let hasCPUorGPU = supported.contains { device in
+                                switch device {
+                                case .cpu, .gpu: return true
+                                default: return false
+                                }
+                            }
+
+                            if hasANE {
+                                aneCapable += 1
+                            } else if hasCPUorGPU {
+                                cpuGpuCapable += 1
+                            } else {
+                                noDevice += 1
+                            }
+                        } else {
+                            noDevice += 1
+                        }
+                    }
+                }
+            default:
+                print("   SKIP: Model is not an MLProgram (NeuralNetwork or Pipeline)")
+            }
+        } catch {
+            print("   FAIL: Could not load compute plan — \(error)")
+            planFailed = true
+        }
+        semaphore.signal()
+    }
+    semaphore.wait()
+
+    if !planFailed && totalOps > 0 {
+        let computeOps = cpuGpuCapable + aneCapable
+        let cpuGpuPct = computeOps > 0 ? String(format: "%.0f%%", Double(cpuGpuCapable) / Double(computeOps) * 100) : "—"
+        let anePct = computeOps > 0 ? String(format: "%.0f%%", Double(aneCapable) / Double(computeOps) * 100) : "—"
+
+        print("   CPU+GPU capable: \(cpuGpuCapable) (\(cpuGpuPct))")
+        print("   Neural Engine capable: \(aneCapable) (\(anePct))")
+        print("   No device (const/reshape): \(noDevice)")
+        print("   Total ops: \(totalOps)")
+
+        if aneCapable == 0 {
+            print()
+            print("   Note: Zero ops are Neural Engine capable.")
+            print("   Root cause: FP32 precision — ANE only operates in FP16.")
+        }
+    }
+} else {
+    print("   SKIP: MLComputePlan requires macOS 14.4+ / iOS 17.4+")
+}
+
 // Cleanup
 try? FileManager.default.removeItem(at: compiledURL)
 
