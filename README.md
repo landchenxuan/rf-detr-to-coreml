@@ -53,8 +53,8 @@ All benchmarks on **MacBook Pro M4 Pro (24 GB)**, coremltools 8.1, torch 2.7.0, 
 
 ### Detection Models
 
-| Model | Size | PyTorch MPS | CoreML ALL | Speedup | Max Box Diff |
-|-------|------|-------------|------------|---------|--------------|
+| Model | Size | PyTorch MPS | CoreML (GPU) | Speedup | Max Box Diff |
+|-------|------|-------------|--------------|---------|--------------|
 | Nano | 103 MB | 21.6 ms | 11.2 ms | **1.9x** | 0.96 |
 | Small | 109 MB | 32.1 ms | 17.9 ms | **1.8x** | 0.97 |
 | Medium | 115 MB | 41.2 ms | 24.1 ms | **1.7x** | 0.97 |
@@ -65,8 +65,8 @@ All benchmarks on **MacBook Pro M4 Pro (24 GB)**, coremltools 8.1, torch 2.7.0, 
 
 ### Segmentation Models
 
-| Model | Size | PyTorch MPS | CoreML ALL | Speedup | Max Mask Diff |
-|-------|------|-------------|------------|---------|---------------|
+| Model | Size | PyTorch MPS | CoreML (GPU) | Speedup | Max Mask Diff |
+|-------|------|-------------|--------------|---------|---------------|
 | Seg-Nano | 117 MB | 29.4 ms | 16 ms | **1.8x** | 0.0027 |
 | Seg-Small | 117 MB | 35.4 ms | 21 ms | **1.7x** | 0.0063 |
 | Seg-Medium | 124 MB | 46.7 ms | 29 ms | **1.6x** | 0.0115 |
@@ -75,6 +75,24 @@ All benchmarks on **MacBook Pro M4 Pro (24 GB)**, coremltools 8.1, torch 2.7.0, 
 | Seg-2XLarge | 134 MB | 169.3 ms | 127 ms | **1.3x** | 0.0508 |
 
 > All segmentation models achieve near-lossless FP32 conversion (box/logit diffs all < 0.005). Outputs: boxes `(1,N,4)` + logits `(1,N,91)` + masks `(1,N,H/4,W/4)`.
+
+### Hardware Acceleration Analysis
+
+We used Apple's `MLComputePlan` API (macOS 14.4+) to inspect per-op device assignment. Results for Nano (representative of all variants):
+
+| | CPU+GPU capable | Neural Engine capable | No device (const/reshape) |
+|-|-----------------|----------------------|---------------------------|
+| **Ops** | 605 (100%) | 0 (0%) | 893 |
+
+**Key finding: zero ops are Neural Engine capable.** Deformable attention's `resample` (grid_sample) op is GPU-only, and since it dominates the compute graph, CoreML routes the entire model to GPU. This is confirmed by timing:
+
+| Compute Units | Nano | Large | Explanation |
+|---------------|------|-------|-------------|
+| CPU_ONLY | 33.6 ms | 124.1 ms | CPU baseline |
+| CPU_AND_NE | 32.9 ms | 124.8 ms | Same as CPU (ANE unused) |
+| **ALL (CPU+GPU)** | **11.1 ms** | **34.5 ms** | **3x faster (GPU active)** |
+
+Use `computeUnits = .all` (or `.cpuAndGPU`) in your app. Setting `.cpuAndNeuralEngine` provides no benefit for RF-DETR models.
 
 ### FP16 Precision Issues
 
@@ -88,7 +106,7 @@ All mixed-precision strategies also fail:
 | Conv/linear weights FP16 only | 379 px | Unusable |
 | Resample+softmax keep FP32 | 387 px | Unusable |
 
-**Always use FP32 in production.** The ~103 MB model size is acceptable for mobile, and FP32 Neural Engine utilization is equally good.
+**Always use FP32 in production.** The ~103 MB model size is acceptable for mobile, and FP32 GPU acceleration works well (1.7-1.9x vs PyTorch MPS).
 
 ## How It Works
 
