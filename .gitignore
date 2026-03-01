@@ -1,0 +1,30 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Model weights (large files)
+*.pth
+*.pt
+
+# Export outputs
+output/
+
+# Upstream RF-DETR (users install via pip)
+rf-detr/
+
+# Compiled Swift binary
+validate_coreml
+
+# Contains API key
+download_roboflow_model.swift
+
+# Claude Code working files
+.claude/
+
+# macOS
+.DS_Store

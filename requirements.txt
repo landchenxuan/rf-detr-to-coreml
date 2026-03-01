@@ -1,0 +1,8 @@
+# RF-DETR CoreML Export Tool — pinned dependencies
+torch==2.7.0
+torchvision==0.22.0
+coremltools==8.1
+transformers==4.44.0
+
+# RF-DETR upstream (install via: pip install rfdetr)
+# rfdetr==1.5.1
