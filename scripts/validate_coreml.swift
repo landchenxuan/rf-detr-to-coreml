@@ -1,18 +1,29 @@
 #!/usr/bin/env swift
-// Validate our CoreML model using Apple's native ML framework.
-// This simulates how a real iOS/macOS app (including Roboflow Swift SDK) would load and run the model.
+//
+// Validate a CoreML model using Apple's native ML framework.
+// Simulates how a real iOS/macOS app loads and runs the model.
+//
+// Usage:
+//   swift scripts/validate_coreml.swift output/rf-detr-nano-fp32.mlpackage
+//   swift scripts/validate_coreml.swift output/rf-detr-seg-nano-fp32.mlpackage
 
 import Foundation
 import CoreML
 import CoreImage
 import Vision
 
-let modelPath = "output/rf-detr-base-fp32.mlpackage"
+// Parse command line
+guard CommandLine.arguments.count >= 2 else {
+    print("Usage: swift \(CommandLine.arguments[0]) <path-to-mlpackage>")
+    exit(1)
+}
+let modelPath = CommandLine.arguments[1]
 
 print("=== CoreML Model Validation ===")
+print("Model: \(modelPath)")
 print()
 
-// Step 1: Compile the model (same as MLModel.compileModel on iOS)
+// Step 1: Compile the model
 print("1. Compiling model...")
 let modelURL = URL(fileURLWithPath: modelPath)
 let compiledURL: URL
@@ -26,8 +37,8 @@ do {
 
 // Step 2: Load with different compute unit configurations
 let configs: [(String, MLComputeUnits)] = [
-    ("ALL (GPU + Neural Engine)", .all),
-    ("CPU_AND_NE (Roboflow config)", .cpuAndNeuralEngine),
+    ("ALL (CPU+GPU)", .all),
+    ("CPU_AND_NE", .cpuAndNeuralEngine),
     ("CPU_ONLY", .cpuOnly),
 ]
 
@@ -46,51 +57,48 @@ for (name, units) in configs {
     }
 }
 
-// Step 3: Inspect model spec
+// Step 3: Inspect model spec (auto-detect resolution)
 print()
 print("3. Model specification:")
+var resolution = 0
 if let (_, model) = models.first {
     let desc = model.modelDescription
 
     print("   Inputs:")
     for (name, feat) in desc.inputDescriptionsByName {
-        print("     \(name): \(feat.type.rawValue), constraint=\(feat.imageConstraint?.pixelsWide ?? 0)x\(feat.imageConstraint?.pixelsHigh ?? 0)")
         if let imgConstraint = feat.imageConstraint {
-            print("       pixelFormat: \(imgConstraint.pixelFormatType)")
-            print("       size: \(imgConstraint.pixelsWide)x\(imgConstraint.pixelsHigh)")
-        }
-        if let multiConstraint = feat.multiArrayConstraint {
-            print("       shape: \(multiConstraint.shape)")
-            print("       dataType: \(multiConstraint.dataType.rawValue)")
+            resolution = imgConstraint.pixelsWide
+            print("     \(name): Image \(imgConstraint.pixelsWide)x\(imgConstraint.pixelsHigh)")
+        } else if let multiConstraint = feat.multiArrayConstraint {
+            print("     \(name): MultiArray shape=\(multiConstraint.shape)")
         }
     }
 
     print("   Outputs:")
     for (name, feat) in desc.outputDescriptionsByName {
-        print("     \(name): type=\(feat.type.rawValue)")
         if let multiConstraint = feat.multiArrayConstraint {
-            print("       shape: \(multiConstraint.shape)")
-            print("       dataType: \(multiConstraint.dataType.rawValue)")
+            print("     \(name): shape=\(multiConstraint.shape), dtype=\(multiConstraint.dataType.rawValue)")
+        } else {
+            print("     \(name): type=\(feat.type.rawValue)")
         }
     }
-
-    print("   Metadata:")
-    print("     author: \(desc.metadata[.author] ?? "n/a")")
-    print("     description: \(desc.metadata[.description] ?? "n/a")")
-    print("     version: \(desc.metadata[.versionString] ?? "n/a")")
 }
 
-// Step 4: Create test input (560x560 random image)
+guard resolution > 0 else {
+    print("   FAIL: Could not detect input resolution from model spec")
+    exit(1)
+}
+
+// Step 4: Create test image
 print()
-print("4. Running inference with test image...")
-let resolution = 560
+print("4. Running inference with \(resolution)x\(resolution) test image...")
 let pixelCount = resolution * resolution
-var pixelData = [UInt8](repeating: 0, count: pixelCount * 4) // RGBA
+var pixelData = [UInt8](repeating: 0, count: pixelCount * 4)
 for i in 0..<pixelCount {
-    pixelData[i * 4 + 0] = UInt8.random(in: 0...255) // R
-    pixelData[i * 4 + 1] = UInt8.random(in: 0...255) // G
-    pixelData[i * 4 + 2] = UInt8.random(in: 0...255) // B
-    pixelData[i * 4 + 3] = 255 // A
+    pixelData[i * 4 + 0] = UInt8.random(in: 0...255)
+    pixelData[i * 4 + 1] = UInt8.random(in: 0...255)
+    pixelData[i * 4 + 2] = UInt8.random(in: 0...255)
+    pixelData[i * 4 + 3] = 255
 }
 
 let colorSpace = CGColorSpaceCreateDeviceRGB()
@@ -107,107 +115,16 @@ guard let context = CGContext(
     print("   FAIL: Could not create test image")
     exit(1)
 }
-
 let ciImage = CIImage(cgImage: cgImage)
-print("   Test image: \(resolution)x\(resolution) RGBA")
 
-// Step 5: Run inference on all compute unit configs and compare
-var allOutputs: [(String, [String: MLMultiArray])] = []
-
+// Step 5: Run inference and benchmark
+print()
+print("5. Latency benchmark (20 runs each):")
 for (name, model) in models {
-    let startTime = CFAbsoluteTimeGetCurrent()
-
-    // Use VNCoreMLRequest like Roboflow SDK does
     guard let visionModel = try? VNCoreMLModel(for: model) else {
         print("   FAIL: \(name) — could not create VNCoreMLModel")
         continue
     }
-
-    let semaphore = DispatchSemaphore(value: 0)
-    var outputArrays: [String: MLMultiArray] = [:]
-    var inferenceError: Error? = nil
-
-    let request = VNCoreMLRequest(model: visionModel) { request, error in
-        defer { semaphore.signal() }
-        if let error = error {
-            inferenceError = error
-            return
-        }
-        guard let results = request.results as? [VNCoreMLFeatureValueObservation] else {
-            inferenceError = NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "No results"])
-            return
-        }
-        for result in results {
-            if let arr = result.featureValue.multiArrayValue {
-                outputArrays[result.featureName] = arr
-            }
-        }
-    }
-    request.imageCropAndScaleOption = .scaleFill
-
-    let handler = VNImageRequestHandler(ciImage: ciImage, options: [:])
-    do {
-        try handler.perform([request])
-    } catch {
-        print("   FAIL: \(name) — \(error)")
-        continue
-    }
-    semaphore.wait()
-
-    let elapsed = (CFAbsoluteTimeGetCurrent() - startTime) * 1000
-
-    if let error = inferenceError {
-        print("   FAIL: \(name) — \(error)")
-        continue
-    }
-
-    print("   OK: \(name) — \(elapsed.rounded())ms, outputs: \(outputArrays.keys.sorted())")
-    for (key, arr) in outputArrays.sorted(by: { $0.key < $1.key }) {
-        print("       \(key): shape=\(arr.shape), type=\(arr.dataType.rawValue)")
-    }
-
-    allOutputs.append((name, outputArrays))
-}
-
-// Step 6: Cross-validate outputs between compute units
-print()
-print("5. Cross-validation between compute units:")
-if allOutputs.count >= 2 {
-    let (name0, out0) = allOutputs[0]
-    for i in 1..<allOutputs.count {
-        let (nameI, outI) = allOutputs[i]
-
-        for key in out0.keys.sorted() {
-            guard let arr0 = out0[key], let arrI = outI[key] else {
-                print("   MISSING: \(key) in \(nameI)")
-                continue
-            }
-
-            let count = arr0.count
-            var maxDiff: Float = 0
-            var sumDiff: Float = 0
-
-            let ptr0 = arr0.dataPointer.assumingMemoryBound(to: Float.self)
-            let ptrI = arrI.dataPointer.assumingMemoryBound(to: Float.self)
-
-            for j in 0..<count {
-                let diff = abs(ptr0[j] - ptrI[j])
-                maxDiff = max(maxDiff, diff)
-                sumDiff += diff
-            }
-            let avgDiff = sumDiff / Float(count)
-
-            print("   \(name0) vs \(nameI)")
-            print("     \(key): maxDiff=\(maxDiff), avgDiff=\(avgDiff)")
-        }
-    }
-}
-
-// Step 7: Latency benchmark
-print()
-print("6. Latency benchmark (20 runs each):")
-for (name, model) in models {
-    guard let visionModel = try? VNCoreMLModel(for: model) else { continue }
 
     // Warmup
     for _ in 0..<3 {
@@ -233,7 +150,7 @@ for (name, model) in models {
     print("   \(name): median=\(String(format: "%.1f", median))ms, P5-P95=[\(String(format: "%.1f", p5)), \(String(format: "%.1f", p95))]")
 }
 
-// Cleanup compiled model
+// Cleanup
 try? FileManager.default.removeItem(at: compiledURL)
 
 print()

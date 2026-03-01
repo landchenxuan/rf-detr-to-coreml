@@ -1,6 +1,6 @@
 # RF-DETR to CoreML
 
-Export [RF-DETR](https://github.com/roboflow/rf-detr) v1.5.1 **detection + segmentation** models to Apple CoreML format with GPU/Neural Engine acceleration.
+Export [RF-DETR](https://github.com/roboflow/rf-detr) v1.5.1 **detection + segmentation** models to Apple CoreML format with GPU acceleration.
 
 ## Installation
 
@@ -171,10 +171,8 @@ rf-dert-to-coreml/
 │   ├── export.py               # NormalizedWrapper + export logic
 │   └── cli.py                  # CLI entry point (rfdetr-coreml command)
 ├── scripts/                    # Test and benchmark scripts
-│   ├── test_all_models.py      # Integration test for all detection models
-│   ├── test_seg_nano.py        # Segmentation model test
-│   ├── test_seg_all.py         # All segmentation models test
-│   ├── benchmark_base.py       # Detailed Base model benchmark
+│   ├── test_export.py          # Export + accuracy test (all models)
+│   ├── benchmark.py            # Latency benchmark (all compute units)
 │   └── validate_coreml.swift   # Native Swift/CoreML validation
 ├── export_coreml.py            # Convenience script (calls cli.main())
 ├── pyproject.toml              # pip install config
