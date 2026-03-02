@@ -5,6 +5,7 @@ CLI entry point for rfdetr-coreml.
 Usage:
     rfdetr-coreml --model nano
     rfdetr-coreml --model nano --weights path/to/finetuned.pth
+    rfdetr-coreml --model nano --batch-size 2
     rfdetr-coreml --model all --output-dir output
 """
 
@@ -57,6 +58,13 @@ def main() -> None:
         help="Path to custom .pth weights (fine-tuned model). "
              "If not specified, uses pre-trained COCO weights.",
     )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=1,
+        help="Batch size for the exported model (default: 1). "
+             "batch=1 uses ImageType input; batch>1 uses TensorType (float32 NCHW [0,1]).",
+    )
     args = parser.parse_args()
 
     if args.weights and args.model == "all":
@@ -67,13 +75,15 @@ def main() -> None:
     results = {}
     for model_name in models:
         logger.info(f"{'='*60}")
-        logger.info(f"Exporting: {model_name} ({args.precision})")
+        batch_desc = f", batch={args.batch_size}" if args.batch_size > 1 else ""
+        logger.info(f"Exporting: {model_name} ({args.precision}{batch_desc})")
         logger.info(f"{'='*60}")
         t0 = time.time()
         try:
             path = export_to_coreml(
                 model_name, args.output_dir, args.precision,
-                weights_path=args.weights
+                weights_path=args.weights,
+                batch_size=args.batch_size,
             )
             elapsed = time.time() - t0
             results[model_name] = (path, elapsed)

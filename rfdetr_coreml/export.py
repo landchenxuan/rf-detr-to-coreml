@@ -11,6 +11,7 @@ import os
 import time
 from copy import deepcopy
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -79,6 +80,7 @@ def export_to_coreml(
     output_dir: str = "output",
     precision: str = "fp32",
     weights_path: str | None = None,
+    batch_size: int = 1,
 ) -> str:
     """
     Export an RF-DETR model to CoreML format.
@@ -91,6 +93,9 @@ def export_to_coreml(
                    catastrophic precision issues with deformable attention.
         weights_path: Path to custom .pth weights (fine-tuned model).
                       If None, downloads pre-trained COCO weights.
+        batch_size: Batch size for the exported model (default 1).
+                    batch=1 uses ct.ImageType (accepts 0-255 uint8 or 0-1 float).
+                    batch>1 uses ct.TensorType (accepts 0-1 float32 NCHW).
 
     Returns:
         Path to the saved .mlpackage directory.
@@ -99,9 +104,12 @@ def export_to_coreml(
 
     if model_name not in MODEL_REGISTRY:
         raise ValueError(f"Unknown model: {model_name}. Choose from {list(MODEL_REGISTRY.keys())}")
+    if batch_size < 1:
+        raise ValueError(f"batch_size must be >= 1, got {batch_size}")
 
     resolution = MODEL_REGISTRY[model_name][1]
-    logger.info(f"Exporting RF-DETR {model_name} (resolution={resolution}, precision={precision})")
+    batch_desc = f", batch={batch_size}" if batch_size > 1 else ""
+    logger.info(f"Exporting RF-DETR {model_name} (resolution={resolution}, precision={precision}{batch_desc})")
 
     # Step 1: Instantiate model
     t0 = time.time()
@@ -156,7 +164,7 @@ def export_to_coreml(
 
     # Step 5: Trace with dummy input
     t0 = time.time()
-    dummy = torch.rand(1, 3, resolution, resolution)
+    dummy = torch.rand(batch_size, 3, resolution, resolution)
     with torch.no_grad():
         traced = torch.jit.trace(wrapped, dummy)
     logger.info(f"Traced in {time.time() - t0:.1f}s")
@@ -171,9 +179,18 @@ def export_to_coreml(
             "attention. Use FP32 for production. See README for details."
         )
 
+    if batch_size == 1:
+        inputs = [ct.ImageType(name="image", shape=(1, 3, resolution, resolution), scale=1.0 / 255.0)]
+    else:
+        inputs = [ct.TensorType(
+            name="image",
+            shape=(batch_size, 3, resolution, resolution),
+            dtype=np.float32,
+        )]
+
     mlmodel = ct.convert(
         traced,
-        inputs=[ct.ImageType(name="image", shape=(1, 3, resolution, resolution), scale=1.0 / 255.0)],
+        inputs=inputs,
         convert_to="mlprogram",
         compute_precision=compute_precision,
         minimum_deployment_target=ct.target.iOS16,
@@ -181,7 +198,7 @@ def export_to_coreml(
 
     # Add metadata
     mlmodel.author = "rfdetr_coreml"
-    mlmodel.short_description = f"RF-DETR {model_name} ({precision.upper()}) — {resolution}x{resolution}"
+    mlmodel.short_description = f"RF-DETR {model_name} ({precision.upper()}{batch_desc}) — {resolution}x{resolution}"
     mlmodel.version = "1.5.1"
 
     logger.info(f"Converted in {time.time() - t0:.1f}s")
@@ -192,7 +209,8 @@ def export_to_coreml(
     if weights_path:
         stem = os.path.splitext(os.path.basename(weights_path))[0]
         suffix = f"-{stem}"
-    filename = f"rf-detr-{model_name}{suffix}-{precision}.mlpackage"
+    batch_tag = f"-batch{batch_size}" if batch_size > 1 else ""
+    filename = f"rf-detr-{model_name}{suffix}-{precision}{batch_tag}.mlpackage"
     output_path = os.path.join(output_dir, filename)
     mlmodel.save(output_path)
 

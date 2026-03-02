@@ -22,6 +22,9 @@ rfdetr-coreml --model seg-nano
 # Export a fine-tuned model
 rfdetr-coreml --model nano --weights path/to/finetuned.pth
 
+# Export with batch size 2 (for batched inference)
+rfdetr-coreml --model nano --batch-size 2
+
 # Export all pre-trained models (detection + segmentation)
 rfdetr-coreml --model all --output-dir output
 ```
@@ -40,6 +43,7 @@ python export_coreml.py --model nano
 | `--precision` | `fp32` | Compute precision: `fp32` (recommended) or `fp16` (has precision issues) |
 | `--output-dir` | `output` | Output directory |
 | `--weights` | None | Path to custom weights (fine-tuned model). Uses COCO pre-trained weights if not specified |
+| `--batch-size` | `1` | Batch size for exported model. `1` uses ImageType input; `>1` uses TensorType (float32 NCHW `[0,1]`) |
 
 ## Performance
 
@@ -99,6 +103,19 @@ This is confirmed by timing:
 | **ALL (CPU+GPU)** | **11.1 ms** | **34.5 ms** | **3x faster (GPU active)** |
 
 Use `computeUnits = .all` (or `.cpuAndGPU`) in your app. Setting `.cpuAndNeuralEngine` provides no benefit for RF-DETR models.
+
+### Batch Size
+
+The CLI supports exporting with arbitrary batch sizes (`--batch-size N`), but **batch=1 is optimal** on Apple Silicon. Benchmark on M4 Pro with 17 real images (Small, 512x512, FP32, reproducible via `python scripts/test_batch2_gpu.py`):
+
+| Batch Size | ms/photo | GPU Utilization | Speedup |
+|------------|----------|-----------------|---------|
+| 1 | 20.5 ms | mean 83% | baseline |
+| 2 | 21.0 ms | mean 84% | 0.97x |
+
+GPU is already near-saturated at batch=1. Larger batches cannot improve throughput — the GPU simply has no idle cycles to fill. This is expected for transformer models with ~50 GFLOPs on M4 Pro's GPU (achieving ~13-19% compute efficiency, normal for non-GEMM-dominated workloads like deformable attention).
+
+> **Note:** batch>1 models use `TensorType` input (float32 NCHW in `[0,1]` range) instead of `ImageType`. If you have a use case that benefits from batching on other hardware, the option is available.
 
 ### Why Not ONNX → CoreML?
 
@@ -195,6 +212,8 @@ rf-detr-to-coreml/
 │   ├── benchmark_onnx.py       # ONNX Runtime vs Direct CoreML comparison
 │   ├── _export_onnx_raw.py     # Unpatched ONNX export (called by benchmark_onnx.py)
 │   ├── test_fp16.py            # FP16 precision strategy tests
+│   ├── test_batch2.py          # Batch=2 export + throughput benchmark
+│   ├── test_batch2_gpu.py      # Batch=1 vs batch=2 with GPU utilization monitoring
 │   └── validate_coreml.swift   # Native Swift/CoreML + MLComputePlan analysis
 ├── export_coreml.py            # Convenience script (calls cli.main())
 ├── pyproject.toml              # pip install config
