@@ -109,3 +109,72 @@ def apply_coremltools_patches() -> None:
         pass
 
     logger.info("Patched coremltools view op")
+
+    # --- Patch 3: meshgrid (coremltools 9.0 shape-inference regression) ---
+    # In ct 8.1 the meshgrid inputs (torch.linspace / torch.arange, rank-1 in
+    # source) trace as rank-1. In ct 9.0 they can arrive as rank>1, tripping the
+    # handler's `_check_args` ("meshgrid received non-1d tensor."). RF-DETR's two
+    # meshgrid sites (transformer.gen_encoder_output_proposals, box_ops) are both
+    # semantically 1-D, so flattening each input to rank-1 is safe and correct.
+    from coremltools.converters.mil.frontend.torch.ops import _get_kwinputs
+    from coremltools.converters.mil.frontend.torch import ops as _ct_ops_mod
+
+    def patched_meshgrid(context, node):
+        inputs = _get_inputs(context, node, expected=[1, 2])
+        nargs = len(inputs)
+        tensor_inputs = inputs[0]
+        indexing = inputs[1].val if nargs > 1 else "ij"
+        indexing = _get_kwinputs(context, node, "indexing", default=[indexing])[0]
+        if isinstance(indexing, Var):
+            indexing = indexing.val
+
+        if not isinstance(tensor_inputs, (list, tuple)):
+            raise ValueError("meshgrid requires a list/tuple of tensors.")
+        if len(tensor_inputs) < 2:
+            raise ValueError("Requires >= 2 tensor inputs.")
+        if indexing not in ("ij", "xy"):
+            raise ValueError(f"indexing mode {indexing} not supported")
+
+        # Flatten any rank>1 input to rank-1 (inputs are semantically 1-D).
+        flat_inputs = []
+        for i, ti in enumerate(tensor_inputs):
+            if ti.rank > 1:
+                ti = mb.reshape(x=ti, shape=[-1], name=node.name + f"_flatten{i}")
+            flat_inputs.append(ti)
+        tensor_inputs = flat_inputs
+
+        result_symbolic_shape = [ti.shape[0] for ti in tensor_inputs]
+        result_shape = _ct_ops_mod._utils.maybe_replace_symbols_with_source_tensor_shape_variables(
+            result_symbolic_shape, tensor_inputs
+        )
+
+        grids = []
+        size = len(tensor_inputs)
+        for i in range(size):
+            view_shape = [1] * size
+            view_shape[i] = -1
+            view = mb.reshape(
+                x=tensor_inputs[i], shape=tuple(view_shape), name=node.name + "_view_" + str(i)
+            )
+            reps = result_shape.copy()
+            reps[i] = 1
+            if any(isinstance(rep, Var) for rep in reps):
+                reps = mb.concat(values=reps, axis=0)
+            res = mb.tile(x=view, reps=reps, name=node.name + "_expand_" + str(i))
+            if indexing == "xy":
+                perm = [1, 0] + list(range(2, size))
+                res = mb.transpose(x=res, perm=perm, name=node.name + "_transpose_" + str(i))
+            grids.append(res)
+
+        context.add(tuple(grids), node.name)
+
+    ct_ops.meshgrid = patched_meshgrid
+    try:
+        from coremltools.converters.mil.frontend.torch.ops import _TORCH_OPS_REGISTRY
+        for alias in ["meshgrid", "meshgrid.indexing"]:
+            if alias in _TORCH_OPS_REGISTRY:
+                _TORCH_OPS_REGISTRY[alias] = patched_meshgrid
+    except ImportError:
+        pass
+
+    logger.info("Patched coremltools meshgrid op")
