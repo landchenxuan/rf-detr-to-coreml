@@ -229,8 +229,6 @@ scripts/
 - [timnielen/rf-detr](https://github.com/timnielen/rf-detr), which first showed
   a practical Core ML conversion path by refactoring deformable attention around
   Core ML's rank limit.
-- [apple/coremltools#2665](https://github.com/apple/coremltools/pull/2665),
-  whose meshgrid fix matches one of the released-version workarounds used here.
 
 ## License
 
