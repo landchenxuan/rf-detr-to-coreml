@@ -21,7 +21,8 @@ _applied = False
 # Patch B: replacement for ms_deform_attn_core_pytorch
 # Accepts tensors with batch and heads already merged (all ≤ rank-5).
 # ---------------------------------------------------------------------------
-def _ms_deform_attn_core_5d(value, value_spatial_shapes, sampling_locations, attention_weights):
+def _ms_deform_attn_core_5d(value, value_spatial_shapes, sampling_locations, attention_weights,
+                            spatial_shapes_hw=None):
     """
     Core deformable attention with merged batch+heads (max rank 5).
 
@@ -30,19 +31,27 @@ def _ms_deform_attn_core_5d(value, value_spatial_shapes, sampling_locations, att
         value_spatial_shapes: (L, 2) — [(H_0, W_0), ...]
         sampling_locations: (B*H, Len_q, L, P, 2) — 5D
         attention_weights: (B*H, Len_q, L*P)
+        spatial_shapes_hw: optional list of Python-int (H, W) pairs (rfdetr >=1.7).
+            When provided, used for split/view so concrete ints reach trace.
     Returns:
         (B*H, Len_q, head_dim)
     """
     BH, head_dim, _ = value.shape
     _, Len_q, L, P, _ = sampling_locations.shape
 
-    value_list = value.split([int(H_ * W_) for H_, W_ in value_spatial_shapes], dim=2)
+    # Prefer Python-int (H, W) pairs (trace-friendly) when the caller supplies them.
+    if spatial_shapes_hw is not None:
+        shapes = [(int(H_), int(W_)) for (H_, W_) in spatial_shapes_hw]
+    else:
+        shapes = [(int(H_), int(W_)) for (H_, W_) in value_spatial_shapes]
+
+    value_list = value.split([H_ * W_ for H_, W_ in shapes], dim=2)
     sampling_grids = 2 * sampling_locations - 1
 
     sampling_value_list = []
-    for lid_, (H_, W_) in enumerate(value_spatial_shapes):
+    for lid_, (H_, W_) in enumerate(shapes):
         # (BH, head_dim, H_, W_)
-        value_l_ = value_list[lid_].reshape(BH, head_dim, int(H_), int(W_))
+        value_l_ = value_list[lid_].reshape(BH, head_dim, H_, W_)
         # (BH, Len_q, P, 2)
         sampling_grid_l_ = sampling_grids[:, :, lid_]
         # (BH, head_dim, Len_q, P)
@@ -67,9 +76,12 @@ def _ms_deform_attn_core_5d(value, value_spatial_shapes, sampling_locations, att
 # ---------------------------------------------------------------------------
 def _msdeformattn_forward_5d(self, query, reference_points, input_flatten,
                              input_spatial_shapes, input_level_start_index,
-                             input_padding_mask=None):
+                             input_padding_mask=None, input_spatial_shapes_hw=None):
     """
     MSDeformAttn.forward with rank ≤ 5 tensors (batch+heads merged).
+
+    ``input_spatial_shapes_hw`` (rfdetr >=1.7) carries Python-int (H, W) pairs
+    for trace-friendly split/view; forwarded to the core function.
     """
     N, Len_q, _ = query.shape
     N, Len_in, _ = input_flatten.shape
@@ -129,7 +141,8 @@ def _msdeformattn_forward_5d(self, query, reference_points, input_flatten,
     value = value.transpose(1, 2).contiguous().reshape(N * n_heads, head_dim, Len_in)
 
     # --- core attention (all ≤ rank 5) ---
-    output = _ms_deform_attn_core_5d(value, input_spatial_shapes, sampling_locations, aw)
+    output = _ms_deform_attn_core_5d(value, input_spatial_shapes, sampling_locations, aw,
+                                     spatial_shapes_hw=input_spatial_shapes_hw)
     # output: (N*n_heads, Len_q, head_dim)
 
     # --- un-merge back to (N, Len_q, C) ---
@@ -214,6 +227,36 @@ def _patch_bicubic_to_bilinear():
 
 
 # ---------------------------------------------------------------------------
+# Patch D: replace segmentation-head custom autograd Function with plain conv2d
+# ---------------------------------------------------------------------------
+def _patch_segmentation_depthwise_conv():
+    """
+    The segmentation head's depthwise conv uses a custom ``torch.autograd.Function``
+    (`_DepthwiseConvWithoutCuDNN`) purely to disable cuDNN in the *backward* pass on
+    certain CUDA stacks (rf-detr issue #731). Its forward is an ordinary ``F.conv2d``.
+
+    ``torch.jit.trace`` captures the custom Function as an opaque ``prim::PythonOp``
+    ('pythonop'), which coremltools cannot convert. For export (eval / CPU / no
+    backward) a plain ``F.conv2d`` is numerically identical, so we swap the module
+    global the call-site resolves at runtime.
+    """
+    try:
+        from rfdetr.models.heads import segmentation as seg_mod
+    except ImportError:
+        logger.warning("segmentation head not found; skipping depthwise-conv patch")
+        return
+
+    class _PlainDepthwiseConv:
+        @staticmethod
+        def apply(x, weight, bias, stride, padding, dilation, groups):
+            return F.conv2d(x, weight, bias, stride=stride, padding=padding,
+                            dilation=dilation, groups=groups)
+
+    seg_mod._DepthwiseConvWithoutCuDNN = _PlainDepthwiseConv
+    logger.info("Patched segmentation depthwise conv: custom Function → F.conv2d")
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 def apply_rfdetr_patches() -> None:
@@ -240,5 +283,8 @@ def apply_rfdetr_patches() -> None:
 
     # Patch C: bicubic → bilinear
     _patch_bicubic_to_bilinear()
+
+    # Patch D: segmentation-head custom autograd Function → plain conv2d
+    _patch_segmentation_depthwise_conv()
 
     logger.info("All rfdetr CoreML patches applied")
