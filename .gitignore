@@ -1,4 +1,5 @@
 # Python
+.venv/
 venv/
 __pycache__/
 *.pyc
@@ -13,6 +14,7 @@ build/
 
 # Export outputs
 output/
+*.mlpackage/
 
 # Upstream RF-DETR (users install via pip)
 rf-detr/

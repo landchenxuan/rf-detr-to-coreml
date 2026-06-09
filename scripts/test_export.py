@@ -15,6 +15,8 @@ noise from junk queries. Reports max diff across all images.
 Usage:
   python scripts/test_export.py                    # Test all models
   python scripts/test_export.py --model nano       # Test single model
+  python scripts/test_export.py --model nano --torch-device mps
+  python scripts/test_export.py --model seg-nano --max-box-diff-px 0.05 --max-logit-diff 0.001 --max-mask-diff 0.001
   python scripts/test_export.py --model detection  # Test all detection models
   python scripts/test_export.py --model segmentation  # Test all segmentation models
 """
@@ -54,14 +56,23 @@ def load_test_images():
     return paths
 
 
-def build_pytorch_model(model_name):
+def resolve_torch_device(device):
+    """Resolve the PyTorch reference device used for accuracy comparison."""
+    if device == "auto":
+        return "mps" if torch.backends.mps.is_available() else "cpu"
+    if device == "mps" and not torch.backends.mps.is_available():
+        raise RuntimeError("PyTorch MPS requested but torch.backends.mps is not available")
+    return device
+
+
+def build_pytorch_model(model_name, device):
     """Instantiate RF-DETR model in export mode, wrapped with normalization."""
     resolution = MODEL_REGISTRY[model_name][1]
     model_cls = _import_model_class(model_name)
     rfdetr_model = model_cls()
     pt_model = deepcopy(rfdetr_model.model.model).cpu().eval()
     pt_model.export()
-    wrapped = NormalizedWrapper(pt_model, resolution).eval()
+    wrapped = NormalizedWrapper(pt_model, resolution).eval().to(device)
     del rfdetr_model
     return wrapped
 
@@ -80,17 +91,19 @@ def identify_coreml_outputs(result):
     return boxes, logits, masks
 
 
-def test_model(model_name, output_dir, skip_export=False):
+def test_model(model_name, output_dir, skip_export=False, torch_device="auto"):
     """Export one model and compare CoreML vs PyTorch outputs across all test images."""
     import coremltools as ct
     from PIL import Image
 
     resolution = MODEL_REGISTRY[model_name][1]
     is_seg = model_name.startswith("seg-")
+    torch_device = resolve_torch_device(torch_device)
     mlpackage_path = os.path.join(output_dir, f"rf-detr-{model_name}-fp32.mlpackage")
 
     logger.info(f"\n{'=' * 60}")
     logger.info(f"Testing: {model_name} (resolution={resolution})")
+    logger.info(f"Reference: PyTorch {torch_device.upper()}")
     logger.info(f"{'=' * 60}")
 
     # Export
@@ -112,7 +125,7 @@ def test_model(model_name, output_dir, skip_export=False):
 
     # Build models
     logger.info("Loading PyTorch model...")
-    wrapped_pt = build_pytorch_model(model_name)
+    wrapped_pt = build_pytorch_model(model_name, torch_device)
     ml_model = ct.models.MLModel(mlpackage_path, compute_units=ct.ComputeUnit.ALL)
 
     # Test across all images
@@ -120,6 +133,7 @@ def test_model(model_name, output_dir, skip_export=False):
     logger.info(f"Testing with {len(test_paths)} images...")
 
     max_box_diff_px = 0.0
+    max_logit_diff = 0.0
     max_mask_diff = 0.0
     total_confident = 0
     latency_times = []
@@ -130,13 +144,16 @@ def test_model(model_name, output_dir, skip_export=False):
         )
         img_np = np.array(pil_img)
         pt_input = torch.from_numpy(img_np).permute(2, 0, 1).unsqueeze(0).float() / 255.0
+        pt_input = pt_input.to(torch_device)
 
         # PyTorch inference
         with torch.no_grad():
             pt_out = wrapped_pt(pt_input)
-        pt_boxes = pt_out[0].numpy()[0]   # (300, 4)
-        pt_logits = pt_out[1].numpy()[0]  # (300, num_classes)
-        pt_masks = pt_out[2].numpy()[0] if len(pt_out) > 2 else None  # (300, H, W)
+        if torch_device == "mps":
+            torch.mps.synchronize()
+        pt_boxes = pt_out[0].detach().cpu().numpy()[0]   # (300, 4)
+        pt_logits = pt_out[1].detach().cpu().numpy()[0]  # (300, num_classes)
+        pt_masks = pt_out[2].detach().cpu().numpy()[0] if len(pt_out) > 2 else None  # (300, H, W)
 
         # CoreML inference
         for _ in range(2):
@@ -148,30 +165,53 @@ def test_model(model_name, output_dir, skip_export=False):
         latency_times.append((time.time() - t0) / n_runs * 1000)
 
         cm_boxes, cm_logits, cm_masks = identify_coreml_outputs(result)
-        cm_boxes = cm_boxes[0] if cm_boxes is not None else None       # (300, 4)
-        cm_logits = cm_logits[0] if cm_logits is not None else None    # (300, num_classes)
-        cm_masks = cm_masks[0] if cm_masks is not None else None       # (300, H, W)
+        missing_outputs = []
+        if cm_boxes is None:
+            missing_outputs.append("boxes")
+        if cm_logits is None:
+            missing_outputs.append("logits")
+        if is_seg and cm_masks is None:
+            missing_outputs.append("masks")
+        if is_seg and pt_masks is None:
+            missing_outputs.append("pytorch masks")
+        if missing_outputs:
+            raise RuntimeError(
+                f"Missing required output tensor(s): {', '.join(missing_outputs)}"
+            )
+
+        cm_boxes = cm_boxes[0]       # (300, 4)
+        cm_logits = cm_logits[0]     # (300, num_classes)
+        cm_masks = cm_masks[0] if cm_masks is not None else None  # (300, H, W)
+        if cm_boxes.shape != pt_boxes.shape:
+            raise RuntimeError(f"Box shape mismatch: PyTorch {pt_boxes.shape}, Core ML {cm_boxes.shape}")
+        if cm_logits.shape != pt_logits.shape:
+            raise RuntimeError(f"Logit shape mismatch: PyTorch {pt_logits.shape}, Core ML {cm_logits.shape}")
+        if is_seg and cm_masks.shape != pt_masks.shape:
+            raise RuntimeError(f"Mask shape mismatch: PyTorch {pt_masks.shape}, Core ML {cm_masks.shape}")
 
         # Box diff: only among confident queries (max logit > 0 = sigmoid > 0.5)
         confident = pt_logits.max(axis=1) > 0
         n_conf = int(confident.sum())
         total_confident += n_conf
 
-        if n_conf > 0 and cm_boxes is not None:
+        if n_conf > 0:
             bd = float(np.abs(pt_boxes[confident] - cm_boxes[confident]).max()) * resolution
+            ld = float(np.abs(pt_logits[confident] - cm_logits[confident]).max())
             max_box_diff_px = max(max_box_diff_px, bd)
+            max_logit_diff = max(max_logit_diff, ld)
         else:
             bd = 0.0
+            ld = 0.0
 
         # Mask diff: also only among confident queries
-        if is_seg and cm_masks is not None and pt_masks is not None and n_conf > 0:
+        if is_seg and n_conf > 0:
             md = float(np.abs(pt_masks[confident] - cm_masks[confident]).max())
             max_mask_diff = max(max_mask_diff, md)
         else:
             md = 0.0
 
         logger.info(f"  {os.path.basename(img_path)}: {n_conf} detections, "
-                     f"box={bd:.2f}px"
+                     f"box={bd:.2f}px logit={ld:.6f}"
                      + (f" mask={md:.4f}" if is_seg else ""))
 
     del wrapped_pt, ml_model
@@ -181,6 +221,7 @@ def test_model(model_name, output_dir, skip_export=False):
     logger.info(f"  Latency (ALL, median): {latency_all:.1f} ms")
     logger.info(f"  Total confident detections: {total_confident}")
     logger.info(f"  Max box diff: {max_box_diff_px:.2f} px")
+    logger.info(f"  Max logit diff: {max_logit_diff:.6f}")
     if is_seg:
         logger.info(f"  Max mask diff: {max_mask_diff:.6f}")
 
@@ -190,8 +231,10 @@ def test_model(model_name, output_dir, skip_export=False):
         "size_mb": size_mb,
         "latency_all_ms": latency_all,
         "box_diff_px": max_box_diff_px,
+        "logit_diff": max_logit_diff,
         "mask_diff": max_mask_diff if is_seg else None,
         "total_confident": total_confident,
+        "torch_device": torch_device,
     }
 
 
@@ -202,6 +245,14 @@ def main():
         help="Model name, 'all', 'detection', or 'segmentation'",
     )
     parser.add_argument("--output-dir", default="output")
+    parser.add_argument("--torch-device", choices=["auto", "cpu", "mps"], default="auto",
+                        help="PyTorch reference device for accuracy comparison")
+    parser.add_argument("--max-box-diff-px", type=float,
+                        help="Fail if max confident-query box diff exceeds this many pixels")
+    parser.add_argument("--max-logit-diff", type=float,
+                        help="Fail if max confident-query logit diff exceeds this value")
+    parser.add_argument("--max-mask-diff", type=float,
+                        help="Fail if max confident-query mask diff exceeds this value")
     parser.add_argument("--skip-export", action="store_true",
                         help="Skip export if .mlpackage already exists")
     args = parser.parse_args()
@@ -221,7 +272,27 @@ def main():
     results = []
     for name in models:
         try:
-            r = test_model(name, args.output_dir, args.skip_export)
+            r = test_model(name, args.output_dir, args.skip_export, args.torch_device)
+            failures = []
+            if args.max_box_diff_px is not None and r["box_diff_px"] > args.max_box_diff_px:
+                failures.append(
+                    f"box diff {r['box_diff_px']:.6f}px > {args.max_box_diff_px:.6f}px"
+                )
+            if args.max_logit_diff is not None and r["logit_diff"] > args.max_logit_diff:
+                failures.append(
+                    f"logit diff {r['logit_diff']:.6f} > {args.max_logit_diff:.6f}"
+                )
+            if (
+                args.max_mask_diff is not None
+                and r["mask_diff"] is not None
+                and r["mask_diff"] > args.max_mask_diff
+            ):
+                failures.append(
+                    f"mask diff {r['mask_diff']:.6f} > {args.max_mask_diff:.6f}"
+                )
+            if failures:
+                r["failure"] = "; ".join(failures)
+                logger.error(f"FAILED THRESHOLD: {name} — {r['failure']}")
             results.append(r)
         except Exception as e:
             logger.error(f"FAILED: {name} — {e}", exc_info=True)
@@ -231,17 +302,24 @@ def main():
     n_images = len(load_test_images())
     print(f"\n{'=' * 85}")
     print(f"SUMMARY ({n_images} test images, confident queries only)")
+    print(f"Reference device: {resolve_torch_device(args.torch_device)}")
     print(f"{'=' * 85}")
-    print(f"{'Model':<14s} {'Size':>7s} {'ALL ms':>7s} {'Detections':>11s} {'Box Diff':>12s} {'Mask Diff':>10s}")
+    print(f"{'Model':<14s} {'Size':>7s} {'ALL ms':>7s} {'Detections':>11s} {'Box Diff':>12s} {'Logit Diff':>11s} {'Mask Diff':>10s}")
     print("-" * 85)
     for r in results:
         if "error" in r:
             print(f"{r['model']:<14s}  ERROR: {r['error'][:50]}")
         else:
             bd = f"{r['box_diff_px']:.2f} px" if r["box_diff_px"] is not None else "—"
+            ld = f"{r['logit_diff']:.4f}" if r["logit_diff"] is not None else "—"
             md = f"{r['mask_diff']:.4f}" if r["mask_diff"] is not None else "—"
             print(f"{r['model']:<14s} {r['size_mb']:>6.1f}M {r['latency_all_ms']:>6.1f} "
-                  f"{r['total_confident']:>11d} {bd:>12s} {md:>10s}")
+                  f"{r['total_confident']:>11d} {bd:>12s} {ld:>11s} {md:>10s}")
+            if "failure" in r:
+                print(f"{'':<14s}  FAIL: {r['failure']}")
+
+    if any("error" in r or "failure" in r for r in results):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

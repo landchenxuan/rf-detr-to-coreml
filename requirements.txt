@@ -1,8 +1,8 @@
-# RF-DETR CoreML Export Tool — pinned dependencies
+# RF-DETR CoreML Export Tool - compatibility smoke baseline.
+#
+# This stack targets released packages only. Torch stays at 2.7.0 because
+# coremltools 9.0 marks it as the newest tested Torch version.
 torch==2.7.0
 torchvision==0.22.0
-coremltools==8.1
-transformers==4.44.0
-
-# RF-DETR upstream (install via: pip install rfdetr)
-# rfdetr==1.5.1
+coremltools==9.0
+rfdetr==1.7.1
