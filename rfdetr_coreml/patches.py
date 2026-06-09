@@ -1,10 +1,11 @@
 """
 Runtime monkey-patches for upstream rfdetr to enable CoreML conversion.
 
-Three patches are applied:
+Four patches are applied:
   A) MSDeformAttn.forward — merge batch+heads to keep tensors ≤ rank-5
   B) ms_deform_attn_core_pytorch — accept 5D (batch*heads merged) inputs
   C) Bicubic → bilinear interpolation in DinoV2 backbone pos-encoding
+  D) RF-DETR 1.7 segmentation depthwise-conv PythonOp → plain F.conv2d
 """
 
 import logging
@@ -266,6 +267,7 @@ def apply_rfdetr_patches() -> None:
       A) MSDeformAttn.forward — merge batch+heads to keep tensors ≤ rank-5
       B) ms_deform_attn_core — accept 5D (batch*heads merged) inputs
       C) DinoV2 interpolation — bicubic → bilinear
+      D) RF-DETR 1.7 segmentation depthwise-conv PythonOp → plain F.conv2d
     """
     global _applied
     if _applied:

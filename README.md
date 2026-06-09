@@ -90,6 +90,10 @@ The package targets released RF-DETR versions from the 1.5.x line through the
 current 1.7.x line. The newest compatibility patches target released
 `coremltools` 9.0 and `rfdetr` 1.7.1.
 
+In RF-DETR 1.7, `RFDETRBase` and `RFDETRSegPreview` are deprecated upstream but
+still present. They remain supported here for compatibility; prefer the explicit
+size variants for new exports.
+
 ## Production Notes
 
 - Use `precision=fp32`. RF-DETR deformable attention is sensitive to FP16
@@ -154,10 +158,19 @@ print(path)
 
 ## Why Direct Core ML
 
-RF-DETR can also export to ONNX, but ONNX Runtime's Core ML Execution Provider
-partitions this model and may silently use FP16 in default paths. Direct Core ML
-conversion keeps the patched model in one ML Program graph and was faster in the
-project benchmarks.
+RF-DETR 1.7 has an official export path for ONNX and experimental TFLite. Use
+the upstream exporter when your target is ONNX Runtime, TensorRT, OpenVINO,
+TFLite, or another cross-platform runtime.
+
+This project is Apple-specific. It converts the patched PyTorch model directly
+to a Core ML ML Program package so the RF-DETR/Core ML compatibility fixes are
+applied before conversion. The direct path keeps the model in one Core ML graph
+and was faster than ONNX Runtime's Core ML Execution Provider in this project's
+benchmarks.
+
+The ONNX benchmark scripts are comparison tools, not the recommended RF-DETR
+1.7 export path. Their raw ONNX export intentionally avoids this package's
+patches so it can compare ONNX Runtime against the direct Core ML path.
 
 ## Repository Layout
 
@@ -172,6 +185,8 @@ scripts/
   test_export.py
   benchmark_latency.py
   benchmark_onnx.py
+  smoke_test.py
+  _export_onnx_raw.py
   test_fp16.py
   test_batch2.py
   validate_coreml.swift
@@ -183,6 +198,8 @@ scripts/
 - FP16 is not production-safe for RF-DETR deformable attention.
 - Benchmarks are hardware-specific; validate latency and accuracy on your target
   device.
+- Re-run ONNX/Core ML benchmarks after RF-DETR or ONNX Runtime upgrades; the
+  upstream RF-DETR export path changed substantially in the 1.7 line.
 - Some patches can be removed when released `coremltools` and `rfdetr` versions
   cover the same behavior upstream.
 

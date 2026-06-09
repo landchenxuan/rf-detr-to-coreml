@@ -9,9 +9,10 @@ Compares four inference paths for RF-DETR detection models:
   4. Direct CoreML (.mlpackage from this project)
 
 IMPORTANT: The ONNX model is exported by _export_onnx_raw.py in a subprocess
-that does NOT import rfdetr_coreml, so it uses the raw unpatched rfdetr model.
-This is the same ONNX you'd get from rfdetr's built-in export — with rank-6
-tensors and bicubic interpolation. The Direct CoreML path uses our patched model.
+that does NOT import rfdetr_coreml, so it uses a raw unpatched rfdetr model.
+This is a legacy/manual benchmark baseline, not RF-DETR 1.7's official
+model.export(format="onnx") pipeline. The Direct CoreML path uses this
+package's patched model.
 
 All paths use identical input (RandomState(42)) and report latency, max box diff
 vs PyTorch reference, and graph partition count.
@@ -249,7 +250,7 @@ def benchmark_model(model_name, output_dir, n_runs=50):
         print(f"{name:<42s} {lat_s:>8s} {diff_s:>15s} {parts:>20s}")
     print()
     print("Max Box Diff: in pixels (normalized [0,1] × resolution)")
-    print("ONNX rows: vs unpatched PyTorch reference (raw rfdetr)")
+    print("ONNX rows: vs unpatched PyTorch reference (legacy raw export)")
     print("Direct CoreML: vs patched PyTorch reference (this project)")
 
     return results

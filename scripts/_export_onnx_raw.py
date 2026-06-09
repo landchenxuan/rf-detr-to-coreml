@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Export raw (UNPATCHED) RF-DETR model to ONNX and save PyTorch reference output.
+Export a raw, unpatched RF-DETR model to ONNX for benchmark comparison.
 
-This script intentionally does NOT import rfdetr_coreml, so the model has no
-monkey-patches applied. This produces the same ONNX model you'd get from
-rfdetr's built-in export — with rank-6 tensors and bicubic interpolation intact.
+This script intentionally does NOT import rfdetr_coreml, so this package's Core
+ML conversion patches are not applied. It is a legacy/manual ONNX baseline for
+benchmark_onnx.py, not a replacement for RF-DETR 1.7's official
+model.export(format="onnx") pipeline.
 
 Called by benchmark_onnx.py via subprocess to ensure patch isolation.
 

@@ -10,6 +10,7 @@ import logging
 import os
 import time
 from copy import deepcopy
+from importlib import metadata as importlib_metadata
 
 import numpy as np
 import torch
@@ -38,6 +39,14 @@ MODEL_REGISTRY = {
     "seg-xlarge": ("rfdetr.detr.RFDETRSegXLarge", 624),
     "seg-2xlarge": ("rfdetr.detr.RFDETRSeg2XLarge", 768),
 }
+
+
+def _package_version(package_name: str) -> str:
+    """Return installed package version for Core ML provenance metadata."""
+    try:
+        return importlib_metadata.version(package_name)
+    except importlib_metadata.PackageNotFoundError:
+        return "unknown"
 
 
 class NormalizedWrapper(nn.Module):
@@ -197,9 +206,15 @@ def export_to_coreml(
     )
 
     # Add metadata
+    rfdetr_version = _package_version("rfdetr")
+    coremltools_version = _package_version("coremltools")
     mlmodel.author = "rfdetr_coreml"
     mlmodel.short_description = f"RF-DETR {model_name} ({precision.upper()}{batch_desc}) — {resolution}x{resolution}"
-    mlmodel.version = "1.5.1"
+    mlmodel.version = rfdetr_version
+    mlmodel.user_defined_metadata["rfdetr_version"] = rfdetr_version
+    mlmodel.user_defined_metadata["coremltools_version"] = coremltools_version
+    mlmodel.user_defined_metadata["model_variant"] = model_name
+    mlmodel.user_defined_metadata["precision"] = precision
 
     logger.info(f"Converted in {time.time() - t0:.1f}s")
 
