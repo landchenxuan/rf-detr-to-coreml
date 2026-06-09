@@ -14,12 +14,16 @@ All notable changes to this project are recorded here.
 
 ### Fixed
 
+- Updated the detection `large` registry entry to `RFDETRLarge`, matching
+  released `rfdetr` 1.7.1.
 - Supported RF-DETR 1.7.x segmentation export by replacing the export-time
   depthwise-conv custom autograd path with a Core ML-convertible equivalent.
 - Kept the released `coremltools` 9.0 meshgrid workaround in place.
 
 ### Added
 
+- Added a fast no-download CI smoke test for dependency imports, CLI wiring,
+  and model registry resolution.
 - Added explicit Core ML vs PyTorch reference verification commands.
 - Added PR hygiene through a repository pull request template.
 

@@ -3,7 +3,7 @@
 Export [RF-DETR](https://github.com/roboflow/rf-detr) detection and
 segmentation models to Apple Core ML.
 
-This project converts RF-DETR directly from PyTorch to Core ML ML Program format
+This project converts RF-DETR directly from PyTorch to Core ML's ML Program format
 and applies a small runtime patch overlay for RF-DETR/coremltools conversion
 gaps. The intended production path is FP32 Core ML running on Apple GPU.
 
@@ -57,6 +57,10 @@ python scripts/test_export.py --model seg-nano --output-dir output --skip-export
 ```
 
 Use `--torch-device auto` to use MPS when available and CPU otherwise.
+
+Pull requests also run a fast no-download smoke check for dependency imports,
+CLI wiring, and supported model registry resolution. Full Core ML vs PyTorch
+checks use the commands above and require generated model artifacts.
 
 ## CLI
 

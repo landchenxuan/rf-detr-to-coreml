@@ -28,7 +28,7 @@ MODEL_REGISTRY = {
     "small": ("rfdetr.detr.RFDETRSmall", 512),
     "medium": ("rfdetr.detr.RFDETRMedium", 576),
     "base": ("rfdetr.detr.RFDETRBase", 560),
-    "large": ("rfdetr.detr.RFDETRLargeNew", 704),
+    "large": ("rfdetr.detr.RFDETRLarge", 704),
     # Segmentation models
     "seg-preview": ("rfdetr.detr.RFDETRSegPreview", 432),
     "seg-nano": ("rfdetr.detr.RFDETRSegNano", 312),
