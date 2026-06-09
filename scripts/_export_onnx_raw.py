@@ -27,7 +27,7 @@ MODEL_REGISTRY = {
     "small": ("rfdetr.detr.RFDETRSmall", 512),
     "medium": ("rfdetr.detr.RFDETRMedium", 576),
     "base": ("rfdetr.detr.RFDETRBase", 560),
-    "large": ("rfdetr.detr.RFDETRLargeNew", 704),
+    "large": ("rfdetr.detr.RFDETRLarge", 704),
 }
 
 IMAGENET_MEAN = [0.485, 0.456, 0.406]
