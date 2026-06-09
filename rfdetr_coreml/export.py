@@ -6,9 +6,11 @@ export_to_coreml() which handles the full pipeline:
   model instantiation → export mode → trace → ct.convert → save
 """
 
+import json
 import logging
 import os
 import time
+from collections.abc import Mapping
 from copy import deepcopy
 from importlib import metadata as importlib_metadata
 
@@ -82,6 +84,118 @@ def _import_model_class(model_name):
     return getattr(module, class_name)
 
 
+def _normalize_class_labels(class_names) -> tuple[list[str], list[int] | None] | None:
+    """Return class names and optional class IDs, or None when no names exist."""
+    if class_names is None or isinstance(class_names, str):
+        return None
+
+    if isinstance(class_names, Mapping):
+        if not class_names:
+            return None
+        try:
+            items = sorted(class_names.items(), key=lambda item: int(item[0]))
+            class_ids = [int(class_id) for class_id, _ in items]
+        except (TypeError, ValueError):
+            return None
+        return [str(name) for _, name in items], class_ids
+
+    try:
+        names = list(class_names)
+    except TypeError:
+        return None
+    if not names:
+        return None
+    return [str(name) for name in names], None
+
+
+def _checkpoint_arg(checkpoint: dict, name: str):
+    args = checkpoint.get("args")
+    if isinstance(args, dict):
+        return args.get(name)
+    return getattr(args, name, None)
+
+
+def _extract_checkpoint_class_labels(checkpoint: dict) -> tuple[list[str], list[int] | None] | None:
+    """Extract class names embedded by RF-DETR training checkpoints."""
+    for candidate in (
+        checkpoint.get("class_names"),
+        _checkpoint_arg(checkpoint, "class_names"),
+    ):
+        class_labels = _normalize_class_labels(candidate)
+        if class_labels is not None:
+            return class_labels
+    return None
+
+
+def _class_names_to_metadata(class_names: list[str], class_ids, source: str) -> dict[str, str]:
+    class_ids = [int(class_id) for class_id in class_ids]
+    if len(class_names) != len(class_ids):
+        raise ValueError(
+            f"class_names and class_ids must have the same length, got "
+            f"{len(class_names)} names and {len(class_ids)} ids"
+        )
+
+    return {
+        "class_names": json.dumps(class_names, ensure_ascii=False, separators=(",", ":")),
+        "class_ids": json.dumps(class_ids, separators=(",", ":")),
+        "class_mapping": json.dumps(
+            {str(class_id): class_name for class_id, class_name in zip(class_ids, class_names)},
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        "class_count": str(len(class_names)),
+        "class_names_source": source,
+    }
+
+
+def _class_names_metadata(
+    rfdetr_model,
+    *,
+    weights_path: str | None,
+    checkpoint_class_labels: tuple[list[str], list[int] | None] | None,
+    num_classes: int | None,
+) -> dict[str, str]:
+    """Build Core ML user-defined metadata for RF-DETR class labels."""
+    if checkpoint_class_labels is not None:
+        checkpoint_class_names, checkpoint_class_ids = checkpoint_class_labels
+        return _class_names_to_metadata(
+            checkpoint_class_names,
+            checkpoint_class_ids or range(len(checkpoint_class_names)),
+            "checkpoint",
+        )
+
+    class_labels = _normalize_class_labels(getattr(rfdetr_model, "class_names", None))
+    if class_labels is None:
+        return {"class_names_source": "unavailable"}
+    class_names, class_ids = class_labels
+
+    if weights_path is not None:
+        metadata = {"class_names_source": "unavailable"}
+        if num_classes is not None:
+            metadata["class_count"] = str(num_classes)
+        return metadata
+
+    try:
+        from rfdetr.assets.coco_classes import COCO_CLASSES, COCO_CLASS_NAMES
+    except ImportError:
+        try:
+            from rfdetr.util.coco_classes import COCO_CLASSES
+        except ImportError:
+            COCO_CLASSES = {}
+        if isinstance(COCO_CLASSES, Mapping):
+            COCO_CLASS_NAMES = [name for _, name in sorted(COCO_CLASSES.items())]
+        else:
+            COCO_CLASSES = {}
+            COCO_CLASS_NAMES = []
+
+    if class_names == list(COCO_CLASS_NAMES):
+        return _class_names_to_metadata(class_names, COCO_CLASSES.keys(), "coco")
+    if class_ids is not None:
+        return _class_names_to_metadata(class_names, class_ids, "model")
+
+    return _class_names_to_metadata(class_names, range(len(class_names)), "model")
+
+
 def export_to_coreml(
     model_name: str,
     output_dir: str = "output",
@@ -121,6 +235,8 @@ def export_to_coreml(
     # Step 1: Instantiate model
     t0 = time.time()
     model_cls = _import_model_class(model_name)
+    checkpoint_class_labels = None
+    num_classes = None
 
     if weights_path:
         # For custom weights: load checkpoint first to detect num_classes,
@@ -135,10 +251,12 @@ def export_to_coreml(
         else:
             state_dict = checkpoint
 
+        if isinstance(checkpoint, dict):
+            checkpoint_class_labels = _extract_checkpoint_class_labels(checkpoint)
+
         # Detect num_classes from the classification head weight.
         # RF-DETR internally adds +1 for background class, so
         # class_embed.weight shape = (num_classes + 1, dim).
-        num_classes = None
         for key in ("class_embed.0.weight", "class_embed.weight"):
             if key in state_dict:
                 num_classes = state_dict[key].shape[0] - 1
@@ -153,6 +271,10 @@ def export_to_coreml(
         rfdetr_model.model.model.load_state_dict(state_dict, strict=False)
     else:
         rfdetr_model = model_cls()
+
+    if num_classes is None:
+        model_args = getattr(rfdetr_model.model, "args", None)
+        num_classes = getattr(model_args, "num_classes", None)
 
     logger.info(f"Model instantiated in {time.time() - t0:.1f}s")
 
@@ -213,6 +335,12 @@ def export_to_coreml(
     mlmodel.user_defined_metadata["coremltools_version"] = coremltools_version
     mlmodel.user_defined_metadata["model_variant"] = model_name
     mlmodel.user_defined_metadata["precision"] = precision
+    mlmodel.user_defined_metadata.update(_class_names_metadata(
+        rfdetr_model,
+        weights_path=weights_path,
+        checkpoint_class_labels=checkpoint_class_labels,
+        num_classes=num_classes,
+    ))
 
     logger.info(f"Converted in {time.time() - t0:.1f}s")
 

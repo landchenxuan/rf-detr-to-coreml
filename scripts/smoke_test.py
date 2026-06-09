@@ -10,6 +10,7 @@ the installed RF-DETR release.
 from contextlib import contextmanager, redirect_stdout
 import importlib.metadata as metadata
 import io
+import json
 import socket
 import sys
 
@@ -102,15 +103,90 @@ def check_cli_help() -> None:
     assert "seg-nano" in help_text
 
 
+def check_class_metadata(export_module) -> None:
+    metadata_dict = export_module._class_names_to_metadata(
+        ["person", "dog"],
+        [1, 18],
+        "test",
+    )
+    assert json.loads(metadata_dict["class_names"]) == ["person", "dog"]
+    assert json.loads(metadata_dict["class_ids"]) == [1, 18]
+    assert json.loads(metadata_dict["class_mapping"]) == {"1": "person", "18": "dog"}
+    assert metadata_dict["class_count"] == "2"
+
+    assert export_module._extract_checkpoint_class_labels({
+        "args": {"class_names": ("cat", "bird")},
+    }) == (["cat", "bird"], None)
+
+    assert export_module._extract_checkpoint_class_labels({
+        "args": {"class_names": {1: "person", 18: "dog"}},
+    }) == (["person", "dog"], [1, 18])
+
+    from rfdetr.assets.coco_classes import COCO_CLASS_NAMES
+
+    class CocoModel:
+        class_names = list(COCO_CLASS_NAMES)
+
+    coco_metadata = export_module._class_names_metadata(
+        CocoModel(),
+        weights_path=None,
+        checkpoint_class_labels=None,
+        num_classes=90,
+    )
+    assert coco_metadata["class_names_source"] == "coco"
+    assert json.loads(coco_metadata["class_ids"])[0] == 1
+    assert json.loads(coco_metadata["class_mapping"])["18"] == "dog"
+
+    class FakeModel:
+        class_names = ["cat", "bird"]
+
+    custom_missing_names = export_module._class_names_metadata(
+        FakeModel(),
+        weights_path="custom.pth",
+        checkpoint_class_labels=None,
+        num_classes=2,
+    )
+    assert custom_missing_names == {
+        "class_names_source": "unavailable",
+        "class_count": "2",
+    }
+
+    custom_90_missing_names = export_module._class_names_metadata(
+        CocoModel(),
+        weights_path="custom-90-class.pth",
+        checkpoint_class_labels=None,
+        num_classes=90,
+    )
+    assert custom_90_missing_names == {
+        "class_names_source": "unavailable",
+        "class_count": "90",
+    }
+
+    class Rfdetr15Model:
+        class_names = {1: "person", 18: "dog"}
+
+    rfdetr15_metadata = export_module._class_names_metadata(
+        Rfdetr15Model(),
+        weights_path=None,
+        checkpoint_class_labels=None,
+        num_classes=90,
+    )
+    assert json.loads(rfdetr15_metadata["class_names"]) == ["person", "dog"]
+    assert json.loads(rfdetr15_metadata["class_ids"]) == [1, 18]
+    assert json.loads(rfdetr15_metadata["class_mapping"]) == {"1": "person", "18": "dog"}
+
+
 def main() -> None:
     with network_disabled():
         import rfdetr_coreml
+        import rfdetr_coreml.export as export_module
         from rfdetr_coreml.export import MODEL_REGISTRY, _import_model_class
 
         assert hasattr(rfdetr_coreml, "export_to_coreml")
         check_versions()
         check_registry(MODEL_REGISTRY, _import_model_class)
         check_cli_help()
+        check_class_metadata(export_module)
     print("smoke: ok")
 
 
