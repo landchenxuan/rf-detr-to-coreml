@@ -119,6 +119,10 @@ def check_class_metadata(export_module) -> None:
     }) == (["cat", "bird"], None)
 
     assert export_module._extract_checkpoint_class_labels({
+        "args": {"class_names": "bird"},
+    }) == (["bird"], None)
+
+    assert export_module._extract_checkpoint_class_labels({
         "args": {"class_names": {1: "person", 18: "dog"}},
     }) == (["person", "dog"], [1, 18])
 

@@ -86,8 +86,10 @@ def _import_model_class(model_name):
 
 def _normalize_class_labels(class_names) -> tuple[list[str], list[int] | None] | None:
     """Return class names and optional class IDs, or None when no names exist."""
-    if class_names is None or isinstance(class_names, str):
+    if class_names is None:
         return None
+    if isinstance(class_names, str):
+        return ([class_names], None) if class_names else None
 
     if isinstance(class_names, Mapping):
         if not class_names:
