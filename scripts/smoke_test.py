@@ -14,13 +14,11 @@ import socket
 import sys
 
 
-EXPECTED_MIN_MODELS = {
+EXPECTED_MODELS = {
     "nano",
     "small",
     "medium",
-    "base",
     "large",
-    "seg-preview",
     "seg-nano",
     "seg-small",
     "seg-medium",
@@ -66,8 +64,11 @@ def check_versions() -> None:
 
 
 def check_registry(model_registry, import_model_class) -> None:
-    missing = EXPECTED_MIN_MODELS.difference(model_registry)
+    model_names = set(model_registry)
+    missing = EXPECTED_MODELS.difference(model_names)
+    extra = model_names.difference(EXPECTED_MODELS)
     assert not missing, f"missing model registry entries: {sorted(missing)}"
+    assert not extra, f"unexpected model registry entries: {sorted(extra)}"
 
     failures = []
     for model_name in model_registry:

@@ -8,11 +8,11 @@ FP32 PyTorch reference to demonstrate why FP16 is unusable:
   2. Conv/linear FP16 only — only conv/linear weights in FP16, rest FP32
   3. Resample+softmax FP32 — everything FP16 except resample and softmax
 
-All use identical input (RandomState(42)) and report max box diff in pixels.
+All use the same real test image and report max box diff in pixels.
 
 Usage:
   python scripts/test_fp16.py                 # Test Nano (default)
-  python scripts/test_fp16.py --model base    # Test Base
+  python scripts/test_fp16.py --model medium  # Test Medium
 """
 
 import argparse

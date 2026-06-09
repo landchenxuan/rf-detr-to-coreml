@@ -3,6 +3,8 @@ Monkey-patches for coremltools bugs that block RF-DETR conversion.
 
 Bug 1: _cast() does `dtype(x.val)` where x.val is a shape-(1,) numpy array.
 Bug 2: view() can't handle shape list with non-scalar Var elements.
+Bug 3: meshgrid() rejects rank>1 tensors produced by coremltools 9.0 shape
+       inference even when the source tensors are semantically 1-D.
 """
 
 import logging

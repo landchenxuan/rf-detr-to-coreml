@@ -89,33 +89,25 @@ guard resolution > 0 else {
     exit(1)
 }
 
-// Step 4: Create test image
+// Step 4: Load real test image
 print()
-print("4. Running inference with \(resolution)x\(resolution) test image...")
-let pixelCount = resolution * resolution
-var pixelData = [UInt8](repeating: 0, count: pixelCount * 4)
-for i in 0..<pixelCount {
-    pixelData[i * 4 + 0] = UInt8.random(in: 0...255)
-    pixelData[i * 4 + 1] = UInt8.random(in: 0...255)
-    pixelData[i * 4 + 2] = UInt8.random(in: 0...255)
-    pixelData[i * 4 + 3] = 255
-}
+let cwdURL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+let scriptURL = URL(fileURLWithPath: CommandLine.arguments[0], relativeTo: cwdURL).standardizedFileURL
+let testImagesURL = scriptURL.deletingLastPathComponent().appendingPathComponent("test_images")
+let imageURLs = (try? FileManager.default.contentsOfDirectory(
+    at: testImagesURL,
+    includingPropertiesForKeys: nil
+))?.filter { url in
+    ["jpg", "jpeg", "png"].contains(url.pathExtension.lowercased())
+}.sorted { $0.lastPathComponent < $1.lastPathComponent } ?? []
 
-let colorSpace = CGColorSpaceCreateDeviceRGB()
-let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-guard let context = CGContext(
-    data: &pixelData,
-    width: resolution,
-    height: resolution,
-    bitsPerComponent: 8,
-    bytesPerRow: resolution * 4,
-    space: colorSpace,
-    bitmapInfo: bitmapInfo.rawValue
-), let cgImage = context.makeImage() else {
-    print("   FAIL: Could not create test image")
+guard let testImageURL = imageURLs.first,
+      let ciImage = CIImage(contentsOf: testImageURL) else {
+    print("   FAIL: Could not load test image from \(testImagesURL.path)")
     exit(1)
 }
-let ciImage = CIImage(cgImage: cgImage)
+print("4. Running inference with real test image: \(testImageURL.lastPathComponent)")
+print("   Vision scaleFill target: \(resolution)x\(resolution)")
 
 // Step 5: Run inference and benchmark
 print()

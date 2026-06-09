@@ -7,9 +7,9 @@ only accelerator providing speedup (ANE is unused due to FP32 precision).
 Also benchmarks PyTorch CPU and MPS for comparison.
 
 Usage:
-  python scripts/benchmark.py                  # Benchmark Nano (default)
-  python scripts/benchmark.py --model base     # Benchmark Base
-  python scripts/benchmark.py --model all      # Benchmark all models
+  python scripts/benchmark_latency.py                  # Benchmark Nano (default)
+  python scripts/benchmark_latency.py --model medium   # Benchmark Medium
+  python scripts/benchmark_latency.py --model all      # Benchmark all supported models
 """
 
 import argparse

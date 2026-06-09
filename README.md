@@ -66,7 +66,7 @@ checks use the commands above and require generated model artifacts.
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `--model` | `nano` | Detection: `nano`, `small`, `medium`, `base`, `large`; segmentation: `seg-preview`, `seg-nano`, `seg-small`, `seg-medium`, `seg-large`, `seg-xlarge`, `seg-2xlarge`; or `all` |
+| `--model` | `nano` | Detection: `nano`, `small`, `medium`, `large`; segmentation: `seg-nano`, `seg-small`, `seg-medium`, `seg-large`, `seg-xlarge`, `seg-2xlarge`; or `all` |
 | `--precision` | `fp32` | Use `fp32` for production. `fp16` is available but not reliable for RF-DETR. |
 | `--output-dir` | `output` | Output directory for `.mlpackage` files |
 | `--weights` | None | Path to fine-tuned `.pth` weights |
@@ -77,18 +77,17 @@ checks use the commands above and require generated model artifacts.
 Detection:
 
 ```text
-nano, small, medium, base, large
+nano, small, medium, large
 ```
 
 Segmentation:
 
 ```text
-seg-preview, seg-nano, seg-small, seg-medium, seg-large, seg-xlarge, seg-2xlarge
+seg-nano, seg-small, seg-medium, seg-large, seg-xlarge, seg-2xlarge
 ```
 
-The package targets released RF-DETR versions from the 1.5.x line through the
-current 1.7.x line. The newest compatibility patches target released
-`coremltools` 9.0 and `rfdetr` 1.7.1.
+The package targets released `coremltools` 9.0 and `rfdetr` 1.7.1. Deprecated
+RF-DETR 1.7 variants such as `base` and `seg-preview` are not supported.
 
 ## Production Notes
 
@@ -102,20 +101,25 @@ current 1.7.x line. The newest compatibility patches target released
 
 ## Performance Snapshot
 
-Benchmarks below were measured on a MacBook Pro M4 Pro, FP32, Core ML GPU. The
-full benchmark scripts are in `scripts/`.
+Benchmarks below were measured on Apple M5 Pro 18-core, RF-DETR 1.7.1,
+coremltools 9.0, FP32, Core ML GPU. The full benchmark scripts are in
+`scripts/`.
 
 | Model | PyTorch MPS | Core ML GPU | Notes |
 | --- | ---: | ---: | --- |
-| Nano | 21.6 ms | 11.2 ms | detection |
-| Small | 32.1 ms | 18.0 ms | detection |
-| Large | 59.3 ms | 34.9 ms | detection |
-| Seg-Nano | 29.4 ms | 16 ms | segmentation |
-| Seg-2XLarge | 169.3 ms | 128 ms | segmentation |
+| Nano | 12.1 ms | 8.2 ms | detection |
+| Small | 17.7 ms | 13.2 ms | detection |
+| Medium | 23.5 ms | 16.8 ms | detection |
+| Large | 38.3 ms | 24.8 ms | detection |
+| Seg-Nano | 16.6 ms | 12.0 ms | segmentation |
+| Seg-Small | 20.1 ms | 15.9 ms | segmentation |
+| Seg-Medium | 27.9 ms | 21.3 ms | segmentation |
+| Seg-Large | 39.7 ms | 28.2 ms | segmentation |
+| Seg-XLarge | 73.9 ms | 49.9 ms | segmentation |
+| Seg-2XLarge | 135.0 ms | 94.9 ms | segmentation |
 
-Accuracy was checked on 17 real images. Detection box differences were below
-0.01 px for most variants; the largest segmentation model has higher mask/box
-drift and should be validated for your deployment.
+Use `scripts/test_export.py` to verify Core ML outputs against RF-DETR PyTorch
+on real images for your target model.
 
 ## How It Works
 
@@ -154,10 +158,35 @@ print(path)
 
 ## Why Direct Core ML
 
-RF-DETR can also export to ONNX, but ONNX Runtime's Core ML Execution Provider
-partitions this model and may silently use FP16 in default paths. Direct Core ML
-conversion keeps the patched model in one ML Program graph and was faster in the
-project benchmarks.
+RF-DETR 1.7 has an official export path for ONNX and experimental TFLite. Use
+the upstream exporter when your target is ONNX Runtime, TensorRT, OpenVINO,
+TFLite, or another cross-platform runtime.
+
+This project is Apple-specific. It converts the patched PyTorch model directly
+to a Core ML ML Program package so the RF-DETR/Core ML compatibility fixes are
+applied before conversion. The direct path keeps the model in one Core ML graph
+and was faster than ONNX Runtime's Core ML Execution Provider in this project's
+benchmarks.
+
+The ONNX benchmark script uses RF-DETR 1.7's official ONNX exporter in a
+patch-isolated subprocess, then compares ONNX Runtime against this project's
+direct Core ML path.
+
+Detection-only ONNX benchmark, same machine and dependency versions as above,
+50 timed runs per backend:
+
+| Model | ONNX CPU | ONNX CoreML EP default | ONNX CoreML EP MLProgram FP32 | Direct Core ML | Box diff range |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Nano | 35.1 ms | 54.5 ms | 16.0 ms | 8.2 ms | 0.00-0.12 px |
+| Small | 64.1 ms | 103.8 ms | 23.6 ms | 13.2 ms | 0.00-0.16 px |
+| Medium | 79.5 ms | 146.3 ms | 30.7 ms | 16.9 ms | 0.00-0.11 px |
+| Large | 138.2 ms | 233.8 ms | 41.8 ms | 24.9 ms | 0.00-0.21 px |
+
+The box diff range is measured in pixels over confident PyTorch reference
+queries. ONNX rows compare against RF-DETR's official PyTorch export reference;
+Direct Core ML compares against this project's patched PyTorch reference.
+Segmentation ONNX benchmarks are not included because mask-output handling is
+not implemented in `scripts/benchmark_onnx.py`.
 
 ## Repository Layout
 
@@ -172,6 +201,8 @@ scripts/
   test_export.py
   benchmark_latency.py
   benchmark_onnx.py
+  smoke_test.py
+  _export_onnx_official.py
   test_fp16.py
   test_batch2.py
   validate_coreml.swift
@@ -183,6 +214,8 @@ scripts/
 - FP16 is not production-safe for RF-DETR deformable attention.
 - Benchmarks are hardware-specific; validate latency and accuracy on your target
   device.
+- Re-run ONNX/Core ML benchmarks after RF-DETR or ONNX Runtime upgrades; the
+  upstream RF-DETR export path changed substantially in the 1.7 line.
 - Some patches can be removed when released `coremltools` and `rfdetr` versions
   cover the same behavior upstream.
 
