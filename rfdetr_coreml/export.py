@@ -28,10 +28,8 @@ MODEL_REGISTRY = {
     "nano": ("rfdetr.detr.RFDETRNano", 384),
     "small": ("rfdetr.detr.RFDETRSmall", 512),
     "medium": ("rfdetr.detr.RFDETRMedium", 576),
-    "base": ("rfdetr.detr.RFDETRBase", 560),
     "large": ("rfdetr.detr.RFDETRLarge", 704),
     # Segmentation models
-    "seg-preview": ("rfdetr.detr.RFDETRSegPreview", 432),
     "seg-nano": ("rfdetr.detr.RFDETRSegNano", 312),
     "seg-small": ("rfdetr.detr.RFDETRSegSmall", 384),
     "seg-medium": ("rfdetr.detr.RFDETRSegMedium", 432),
@@ -95,7 +93,7 @@ def export_to_coreml(
     Export an RF-DETR model to CoreML format.
 
     Args:
-        model_name: Model variant key from MODEL_REGISTRY (e.g. 'nano', 'base',
+        model_name: Model variant key from MODEL_REGISTRY (e.g. 'nano',
                     'seg-nano'). Use ``list(MODEL_REGISTRY)`` to see all options.
         output_dir: Directory to save the .mlpackage.
         precision: 'fp16' or 'fp32' (default fp32). WARNING: fp16 has known

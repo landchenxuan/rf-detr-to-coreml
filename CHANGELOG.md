@@ -12,7 +12,12 @@ All notable changes to this project are recorded here.
 - Simplified the README around install, export, verification, production notes,
   and the patch overlay.
 - Updated export documentation for RF-DETR 1.7's official ONNX/TFLite paths and
-  clarified that this repository's ONNX scripts are legacy comparison tools.
+  switched the ONNX benchmark helper to RF-DETR's official ONNX exporter.
+- Removed deprecated RF-DETR 1.7 variants from the supported model registry.
+- Refreshed the README latency snapshot for RF-DETR 1.7.1 on Apple M5 Pro
+  18-core using real test images.
+- Added a README ONNX detection benchmark table and aligned ONNX benchmark box
+  diffs with the confident-query accuracy checks used by `test_export.py`.
 
 ### Fixed
 
