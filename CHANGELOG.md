@@ -35,6 +35,8 @@ All notable changes to this project are recorded here.
   and model registry resolution.
 - Added explicit Core ML vs PyTorch reference verification commands.
 - Added PR hygiene through a repository pull request template.
+- Added Core ML metadata for class names, class IDs, and class ID-to-name
+  mapping.
 
 ## 0.1.0
 
