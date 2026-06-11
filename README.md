@@ -5,7 +5,8 @@ segmentation models to Apple Core ML.
 
 This project converts RF-DETR directly from PyTorch to Core ML's ML Program format
 and applies a small runtime patch overlay for RF-DETR/coremltools conversion
-gaps. The intended production path is FP32 Core ML running on Apple GPU.
+gaps. The intended production path is FP32 Core ML running on Apple GPU. The
+current tested baseline is RF-DETR 1.7.1, coremltools 9.0, and torch 2.7.0.
 
 ## Install
 
