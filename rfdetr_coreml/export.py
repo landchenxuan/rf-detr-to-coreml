@@ -138,6 +138,7 @@ def _class_names_to_metadata(class_names: list[str], class_ids, source: str) -> 
         )
 
     return {
+        "names": str({index: class_name for index, class_name in enumerate(class_names)}),
         "class_names": json.dumps(class_names, ensure_ascii=False, separators=(",", ":")),
         "class_ids": json.dumps(class_ids, separators=(",", ":")),
         "class_mapping": json.dumps(
