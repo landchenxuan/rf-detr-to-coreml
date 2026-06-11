@@ -8,6 +8,7 @@ the installed RF-DETR release.
 """
 
 from contextlib import contextmanager, redirect_stdout
+import ast
 import importlib.metadata as metadata
 import io
 import json
@@ -109,6 +110,7 @@ def check_class_metadata(export_module) -> None:
         [1, 18],
         "test",
     )
+    assert ast.literal_eval(metadata_dict["names"]) == {0: "person", 1: "dog"}
     assert json.loads(metadata_dict["class_names"]) == ["person", "dog"]
     assert json.loads(metadata_dict["class_ids"]) == [1, 18]
     assert json.loads(metadata_dict["class_mapping"]) == {"1": "person", "18": "dog"}
@@ -138,6 +140,7 @@ def check_class_metadata(export_module) -> None:
         num_classes=90,
     )
     assert coco_metadata["class_names_source"] == "coco"
+    assert ast.literal_eval(coco_metadata["names"])[0] == "person"
     assert json.loads(coco_metadata["class_ids"])[0] == 1
     assert json.loads(coco_metadata["class_mapping"])["18"] == "dog"
 
@@ -176,6 +179,7 @@ def check_class_metadata(export_module) -> None:
         num_classes=90,
     )
     assert json.loads(rfdetr15_metadata["class_names"]) == ["person", "dog"]
+    assert ast.literal_eval(rfdetr15_metadata["names"]) == {0: "person", 1: "dog"}
     assert json.loads(rfdetr15_metadata["class_ids"]) == [1, 18]
     assert json.loads(rfdetr15_metadata["class_mapping"]) == {"1": "person", "18": "dog"}
 

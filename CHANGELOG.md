@@ -37,6 +37,8 @@ All notable changes to this project are recorded here.
 - Added PR hygiene through a repository pull request template.
 - Added Core ML metadata for class names, class IDs, and class ID-to-name
   mapping.
+- Added a YOLO-compatible `names` Core ML metadata alias for tools that expect
+  dense output-index class labels.
 
 ## 0.1.0
 

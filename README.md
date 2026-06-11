@@ -99,9 +99,10 @@ RF-DETR 1.7 variants such as `base` and `seg-preview` are not supported.
   not improve throughput because GPU utilization was already high at batch 1.
 - Output resolution is fixed per model variant.
 - Generated Core ML models include class labels in user-defined metadata:
-  `class_names`, `class_ids`, and `class_mapping`. Fine-tuned checkpoints must
-  embed `class_names`; otherwise the exporter records the class count but does
-  not invent labels.
+  `class_names`, `class_ids`, and `class_mapping`, plus a YOLO-compatible
+  `names` alias keyed by dense output index. Fine-tuned checkpoints must embed
+  `class_names`; otherwise the exporter records the class count but does not
+  invent labels.
 
 ## Performance Snapshot
 
