@@ -2,14 +2,15 @@
 """
 Benchmark RF-DETR CoreML model latency across compute unit configurations.
 
-Tests ALL (CPU+GPU), CPU_AND_NE, and CPU_ONLY to demonstrate that GPU is the
-only accelerator providing speedup (ANE is unused due to FP32 precision).
+Tests ALL, CPU_AND_GPU, CPU_AND_NE, and CPU_ONLY for the selected export
+precision. For FP32 models, GPU is the only accelerator providing speedup
+because ANE is unused.
 Also benchmarks PyTorch CPU and MPS for comparison.
 
 Usage:
-  python scripts/benchmark_latency.py                  # Benchmark Nano (default)
-  python scripts/benchmark_latency.py --model medium   # Benchmark Medium
-  python scripts/benchmark_latency.py --model all      # Benchmark all supported models
+  python scripts/benchmark_latency.py                       # Benchmark Nano FP32
+  python scripts/benchmark_latency.py --model medium        # Benchmark Medium FP32
+  python scripts/benchmark_latency.py --model detection --precision fp16
 """
 
 import argparse
@@ -26,6 +27,9 @@ import torch
 # Apply patches before any rfdetr imports
 import rfdetr_coreml  # noqa: F401
 from rfdetr_coreml.export import MODEL_REGISTRY, NormalizedWrapper, _import_model_class, export_to_coreml
+
+DETECTION_MODELS = [k for k in MODEL_REGISTRY if not k.startswith("seg-")]
+SEGMENTATION_MODELS = [k for k in MODEL_REGISTRY if k.startswith("seg-")]
 
 logging.basicConfig(
     level=logging.INFO,
@@ -82,22 +86,25 @@ def stats(times):
     }
 
 
-def benchmark_model(model_name, output_dir, n_runs=50):
+def benchmark_model(model_name, output_dir, precision="fp32", n_runs=50):
     """Run full benchmark for one model variant."""
     import coremltools as ct
     from PIL import Image
 
     resolution = MODEL_REGISTRY[model_name][1]
-    mlpackage_path = os.path.join(output_dir, f"rf-detr-{model_name}-fp32.mlpackage")
+    mlpackage_path = os.path.join(output_dir, f"rf-detr-{model_name}-{precision}.mlpackage")
 
     logger.info(f"\n{'=' * 60}")
-    logger.info(f"Benchmarking: {model_name} (resolution={resolution}, {n_runs} runs)")
+    logger.info(
+        f"Benchmarking: {model_name} "
+        f"(resolution={resolution}, precision={precision}, {n_runs} runs)"
+    )
     logger.info(f"{'=' * 60}")
 
     # Export if needed
     if not os.path.exists(mlpackage_path):
-        logger.info("Exporting to CoreML FP32...")
-        mlpackage_path = export_to_coreml(model_name, output_dir, "fp32")
+        logger.info(f"Exporting to CoreML {precision.upper()}...")
+        mlpackage_path = export_to_coreml(model_name, output_dir, precision)
 
     # Real test image (same as all other scripts)
     test_img_path = sorted(glob.glob(os.path.join(os.path.dirname(__file__), "test_images", "*.jpg")))[0]
@@ -133,9 +140,10 @@ def benchmark_model(model_name, output_dir, n_runs=50):
     del wrapped, pt_model
     gc.collect()
 
-    # CoreML — three compute unit modes (load one at a time to avoid EP conflicts)
+    # CoreML — load one compute unit at a time to avoid EP conflicts.
     for label, cu in [
         ("ALL", ct.ComputeUnit.ALL),
+        ("CPU_AND_GPU", ct.ComputeUnit.CPU_AND_GPU),
         ("CPU_AND_NE", ct.ComputeUnit.CPU_AND_NE),
         ("CPU_ONLY", ct.ComputeUnit.CPU_ONLY),
     ]:
@@ -153,32 +161,43 @@ def main():
     parser = argparse.ArgumentParser(description="Benchmark RF-DETR CoreML latency")
     parser.add_argument(
         "--model", default="nano",
-        help="Model name or 'all' (default: nano)",
+        help="Model name, 'detection', 'segmentation', or 'all' (default: nano)",
     )
+    parser.add_argument("--precision", choices=["fp16", "fp32"], default="fp32")
     parser.add_argument("--output-dir", default="output")
     parser.add_argument("--runs", type=int, default=50, help="Number of timed runs")
     args = parser.parse_args()
 
     if args.model == "all":
         models = list(MODEL_REGISTRY.keys())
+    elif args.model == "detection":
+        models = DETECTION_MODELS
+    elif args.model == "segmentation":
+        models = SEGMENTATION_MODELS
     elif args.model in MODEL_REGISTRY:
         models = [args.model]
     else:
-        parser.error(f"Unknown model: {args.model}. Choose from {list(MODEL_REGISTRY.keys())} or 'all'")
+        parser.error(
+            f"Unknown model: {args.model}. "
+            f"Choose from {list(MODEL_REGISTRY.keys())} or all/detection/segmentation"
+        )
 
     results = []
     for name in models:
         try:
-            r = benchmark_model(name, args.output_dir, args.runs)
+            r = benchmark_model(name, args.output_dir, args.precision, args.runs)
             results.append(r)
         except Exception as e:
             logger.error(f"FAILED: {name} — {e}", exc_info=True)
 
     # Summary
     print(f"\n{'=' * 90}")
-    print("LATENCY SUMMARY (median ms)")
+    print(f"LATENCY SUMMARY (median ms, precision={args.precision})")
     print(f"{'=' * 90}")
-    print(f"{'Model':<14s} {'PT CPU':>7s} {'PT MPS':>7s} {'CM ALL':>7s} {'CM NE':>7s} {'CM CPU':>7s} {'Speedup':>8s}")
+    print(
+        f"{'Model':<14s} {'PT CPU':>7s} {'PT MPS':>7s} "
+        f"{'CM ALL':>7s} {'CM GPU':>7s} {'CM NE':>7s} {'CM CPU':>7s} {'Speedup':>8s}"
+    )
     print("-" * 90)
     for r in results:
         mps = f"{r['pytorch_mps']:.1f}" if "pytorch_mps" in r else "—"
@@ -186,12 +205,15 @@ def main():
         print(
             f"{r['model']:<14s} "
             f"{r['pytorch_cpu']:>6.1f} {mps:>7s} "
-            f"{r['coreml_all']:>6.1f} {r['coreml_cpu_and_ne']:>6.1f} {r['coreml_cpu_only']:>6.1f} "
+            f"{r['coreml_all']:>6.1f} {r['coreml_cpu_and_gpu']:>6.1f} "
+            f"{r['coreml_cpu_and_ne']:>6.1f} {r['coreml_cpu_only']:>6.1f} "
             f"{speedup_val:>7.1f}x"
         )
     print()
-    print("CM ALL = CPU+GPU, CM NE = CPU+NeuralEngine, CM CPU = CPU only")
-    print("Note: CM NE ≈ CM CPU because ANE cannot run FP32 ops (see README).")
+    print("CM ALL = CPU+GPU+NeuralEngine, CM GPU = CPU+GPU, CM NE = CPU+NeuralEngine, CM CPU = CPU only")
+    if args.precision == "fp32":
+        print("Note: for FP32 models, CM NE ≈ CM CPU because ANE cannot run FP32 ops.")
+    print("Use scripts/test_export.py with the same precision for accuracy validation.")
 
 
 if __name__ == "__main__":

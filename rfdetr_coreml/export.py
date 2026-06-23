@@ -213,8 +213,9 @@ def export_to_coreml(
         model_name: Model variant key from MODEL_REGISTRY (e.g. 'nano',
                     'seg-nano'). Use ``list(MODEL_REGISTRY)`` to see all options.
         output_dir: Directory to save the .mlpackage.
-        precision: 'fp16' or 'fp32' (default fp32). WARNING: fp16 has known
-                   catastrophic precision issues with deformable attention.
+        precision: 'fp16' or 'fp32' (default fp32). fp16 can be faster and can
+                   change Core ML accelerator coverage, but detection accuracy
+                   is model/checkpoint-specific and should be validated.
         weights_path: Path to custom .pth weights (fine-tuned model).
                       If None, downloads pre-trained COCO weights.
         batch_size: Batch size for the exported model (default 1).
@@ -307,8 +308,9 @@ def export_to_coreml(
 
     if precision == "fp16":
         logger.warning(
-            "FP16 precision may cause significant accuracy degradation in deformable "
-            "attention. Use FP32 for production. See README for details."
+            "FP16 can change model outputs. Validate this model/checkpoint "
+            "with scripts/test_export.py --precision fp16 before shipping it. "
+            "Use scripts/scan_fp16_precision.py for mixed-precision experiments."
         )
 
     if batch_size == 1:
