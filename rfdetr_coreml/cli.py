@@ -42,8 +42,8 @@ def main() -> None:
         type=str,
         default="fp32",
         choices=["fp16", "fp32"],
-        help="Compute precision (default: fp32). WARNING: fp16 has known "
-             "precision issues with deformable attention.",
+        help="Compute precision (default: fp32). For fp16, benchmark Core ML "
+             "compute units and validate accuracy for your model and weights.",
     )
     parser.add_argument(
         "--output-dir",

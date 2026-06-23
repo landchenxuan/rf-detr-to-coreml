@@ -6,7 +6,7 @@ Compares four inference paths for RF-DETR detection models:
   1. ONNX Runtime — CPUExecutionProvider
   2. ONNX Runtime — CoreMLExecutionProvider (default → NeuralNetwork FP16)
   3. ONNX Runtime — CoreMLExecutionProvider (MLProgram FP32)
-  4. Direct CoreML (.mlpackage from this project)
+  4. Direct CoreML FP32 MLProgram (.mlpackage from this project)
 
 IMPORTANT: The ONNX model is exported by _export_onnx_official.py in a
 subprocess that does NOT import rfdetr_coreml. That keeps the ONNX benchmark on
@@ -155,7 +155,7 @@ def benchmark_model(model_name, output_dir, n_runs=50):
         )
     resolution = DETECTION_MODEL_REGISTRY[model_name][1]
 
-    # Real test image (same as test_export.py / test_fp16.py)
+    # Real test image (same as test_export.py)
     test_img_path = sorted(glob.glob(os.path.join(os.path.dirname(__file__), "test_images", "*.jpg")))[0]
     pil_img = Image.open(test_img_path).convert("RGB").resize(
         (resolution, resolution), Image.BILINEAR
@@ -195,7 +195,7 @@ def benchmark_model(model_name, output_dir, n_runs=50):
     gc.collect()
 
     # --- 2. ONNX Runtime CoreML EP (default → NeuralNetwork FP16) ---
-    logger.info("ONNX Runtime CoreML EP (default)...")
+    logger.info("ONNX Runtime CoreML EP (NN FP16 default)...")
     try:
         sess = ort.InferenceSession(
             onnx_path,
@@ -209,12 +209,12 @@ def benchmark_model(model_name, output_dir, n_runs=50):
         median = float(np.median(times))
 
         logger.info(f"  Median: {median:.1f} ms, Max box diff: {box_diff:.2f} px")
-        results.append(("ONNX Runtime CoreML EP (default)", median, box_diff, "—"))
+        results.append(("ONNX Runtime CoreML EP (NN FP16)", median, box_diff, "—"))
         del sess
         gc.collect()
     except Exception as e:
-        logger.warning(f"  CoreML EP (default) not available: {e}")
-        results.append(("ONNX Runtime CoreML EP (default)", None, None, "N/A"))
+        logger.warning(f"  CoreML EP (NN FP16 default) not available: {e}")
+        results.append(("ONNX Runtime CoreML EP (NN FP16)", None, None, "N/A"))
 
     # --- 3. ONNX Runtime CoreML EP (MLProgram FP32) ---
     logger.info("ONNX Runtime CoreML EP (MLProgram FP32)...")
@@ -245,12 +245,12 @@ def benchmark_model(model_name, output_dir, n_runs=50):
         logger.warning(f"  CoreML EP (MLProgram FP32) not available: {e}")
         results.append(("ONNX Runtime CoreML EP (MLProgram FP32)", None, None, "N/A"))
 
-    # --- 4. Direct CoreML (.mlpackage, uses patched model) ---
+    # --- 4. Direct CoreML FP32 MLProgram (.mlpackage, uses patched model) ---
     # This path uses our monkey-patched model (the whole point of this project).
     # We compare against patched PyTorch reference for a fair accuracy comparison.
     mlpackage_path = os.path.join(output_dir, f"rf-detr-{model_name}-fp32.mlpackage")
     if not os.path.exists(mlpackage_path):
-        logger.info("Exporting Direct CoreML (patched)...")
+        logger.info("Exporting Direct CoreML FP32 MLProgram (patched)...")
         mlpackage_path = export_to_coreml(model_name, output_dir, "fp32")
 
     # Patched PyTorch reference for Direct CoreML comparison
@@ -267,7 +267,7 @@ def benchmark_model(model_name, output_dir, n_runs=50):
     del wrapped, pt_model
     gc.collect()
 
-    logger.info("Direct CoreML (this project)...")
+    logger.info("Direct CoreML FP32 MLProgram (this project)...")
     ml_model = ct.models.MLModel(mlpackage_path, compute_units=ct.ComputeUnit.ALL)
     times = benchmark_coreml(ml_model, {"image": pil_img}, n_runs=n_runs)
     result = ml_model.predict({"image": pil_img})
@@ -275,7 +275,7 @@ def benchmark_model(model_name, output_dir, n_runs=50):
     box_diff = max_confident_box_diff_px(patched_ref_boxes, cm_boxes, patched_ref_logits, resolution)
     median = float(np.median(times))
     logger.info(f"  Median: {median:.1f} ms, Max box diff: {box_diff:.2f} px")
-    results.append(("Direct CoreML (this project)", median, box_diff, "1 partition (all nodes)"))
+    results.append(("Direct CoreML FP32 ALL (this project)", median, box_diff, "1 partition (all nodes)"))
     del ml_model
     gc.collect()
 
@@ -292,7 +292,7 @@ def benchmark_model(model_name, output_dir, n_runs=50):
     print()
     print("Box Diff: max pixels over confident PyTorch reference queries")
     print("ONNX rows: vs official RF-DETR PyTorch reference")
-    print("Direct CoreML: vs patched PyTorch reference (this project)")
+    print("Direct CoreML FP32 ALL: vs patched PyTorch reference (this project)")
 
     return results
 

@@ -18,6 +18,13 @@ All notable changes to this project are recorded here.
   18-core using real test images.
 - Added a README ONNX detection benchmark table and aligned ONNX benchmark box
   diffs with the confident-query accuracy checks used by `test_export.py`.
+- Updated FP16 guidance from raw-query diffing to detection-oriented equivalence:
+  compare confident reference detections, class argmax changes, and
+  confidence-state changes.
+- Documented FP16 detection deltas for nano, small, medium, and large on
+  Apple M5 Pro without treating the limited snapshot as a support matrix.
+- Added FP16 Core ML compute-unit latency notes for `ALL`, `CPU_AND_GPU`, and
+  `CPU_AND_NE` so the Neural Engine path is not inferred from `ALL` latency.
 
 ### Fixed
 
@@ -28,6 +35,8 @@ All notable changes to this project are recorded here.
 - Supported RF-DETR 1.7.x segmentation export by replacing the export-time
   depthwise-conv custom autograd path with a Core ML-convertible equivalent.
 - Kept the released `coremltools` 9.0 meshgrid workaround in place.
+- Corrected the FP16 validation narrative that treated low-confidence unmatched
+  queries as stable detections.
 
 ### Added
 
@@ -39,6 +48,14 @@ All notable changes to this project are recorded here.
   mapping.
 - Added a YOLO-compatible `names` Core ML metadata alias for tools that expect
   dense output-index class labels.
+- Added `scripts/scan_fp16_precision.py` for mixed-precision scan experiments
+  and use `scripts/test_export.py --precision fp16` as the FP16 validation
+  entrypoint.
+- Extended `scripts/benchmark_latency.py` with `--precision` and GPU/NE compute
+  unit timing, and added `scripts/test_export.py --compute-unit` for target
+  validation under a specific Core ML compute unit.
+- Updated `scripts/validate_coreml.swift` to inspect `ALL`, `CPU_AND_GPU`,
+  `CPU_AND_NE`, and `CPU_ONLY`.
 
 ## 0.1.0
 

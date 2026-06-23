@@ -37,7 +37,8 @@ do {
 
 // Step 2: Load with different compute unit configurations
 let configs: [(String, MLComputeUnits)] = [
-    ("ALL (CPU+GPU)", .all),
+    ("ALL (CPU+GPU+NE)", .all),
+    ("CPU_AND_GPU", .cpuAndGPU),
     ("CPU_AND_NE", .cpuAndNeuralEngine),
     ("CPU_ONLY", .cpuOnly),
 ]
