@@ -7,7 +7,7 @@ This project converts RF-DETR directly from PyTorch to Core ML's ML Program form
 and applies a small runtime patch overlay for RF-DETR/coremltools conversion
 gaps. The conservative production path is FP32 Core ML running on Apple GPU.
 FP16 ML Program export is available; current precision evidence is summarized in
-[Benchmark Evidence And Support Boundary](#benchmark-evidence-and-support-boundary).
+[Benchmark Snapshot](#benchmark-snapshot).
 The current tested compatibility baseline is RF-DETR 1.8.1, Core ML Tools 9.0,
 and torch 2.7.0.
 
@@ -118,102 +118,45 @@ alias keyed by dense output index. Fine-tuned checkpoints must embed
 `class_names`; otherwise the exporter records the class count but does not
 invent labels.
 
-## Validate This Target
-
-Validation reports are split by output surface:
-
-| Script | Reported surface |
-| --- | --- |
-| `scripts/test_export.py` | Raw Core ML vs PyTorch export tensor diffs: boxes, logits, and masks. It also reports detection class/confidence changes. |
-| `scripts/evaluate_top1_mask_quality.py` | Post-processed segmentation top-1 mask metrics: IoU, Dice, boundary distance, centroid shift, area change, and confidence flips. |
+## Validate And Measure
 
 The bundled image set is `scripts/test_images`, a 17-image smoke/regression set.
+Use the scripts by question:
 
-```bash
-# FP32 or FP16 exported target report: boxes/logits, plus masks for segmentation
-python scripts/test_export.py --model nano --precision fp32 --output-dir output --skip-export --torch-device mps
+- `scripts/benchmark_latency.py`: direct Core ML latency only.
+- `scripts/test_export.py`: raw Core ML vs PyTorch export tensor diffs:
+  boxes, logits, and masks. It also reports detection class/confidence changes.
+- `scripts/evaluate_top1_mask_quality.py`: post-processed segmentation top-1
+  mask metrics: IoU, Dice, boundary distance, centroid shift, area change, and
+  confidence flips.
+- `scripts/benchmark_onnx.py`: ONNX Runtime vs direct Core ML detection
+  comparison. Segmentation masks are not covered by this script.
 
-# FP16 segmentation report
-python scripts/test_export.py --model segmentation --precision fp16 --output-dir output/fp16-seg-tests --torch-device mps
-```
+The benchmark section below lists the run command for each table. Use
+`python <script> --help` for full options and CI gates.
 
-`scripts/test_export.py` report fields:
-
-| Metric | Meaning |
-| --- | --- |
-| `Box Diff` / `max_box_diff_px` | Maximum confident-query box delta in pixels |
-| `Logit Diff` / `max_logit_diff` | Maximum raw-logit delta for confident PyTorch queries |
-| `Score` / `max_score_diff` | Maximum sigmoid score delta |
-| `Mask Diff` / `max_mask_diff` | Maximum raw mask tensor delta for segmentation models |
-| `Class` / `class_argmax_changes` | Count of confident queries whose top class changed |
-| `Conf` / `confidence_state_changes` | Count of queries crossing the zero-logit confidence boundary |
-
-Common `scripts/test_export.py` options:
-
-| Option | Meaning |
-| --- | --- |
-| `--model` | Model variant such as `nano` or `seg-nano`, or a group: `detection`, `segmentation`, `all` |
-| `--precision` | Core ML target precision to test: `fp32` or `fp16` |
-| `--output-dir` | Directory containing or receiving `.mlpackage` exports |
-| `--skip-export` | Reuse an existing package when present |
-| `--torch-device` | PyTorch reference device: `auto`, `mps`, or `cpu` |
-| `--compute-unit` | Core ML compute unit for validation: `all`, `cpu_and_gpu`, `cpu_and_ne`, or `cpu_only` |
-| `--max-box-diff-px`, `--max-logit-diff`, `--max-score-diff`, `--max-mask-diff` | Optional CI gates; omit them for report-only validation |
-
-Top-1 mask report:
-
-```bash
-# Default all-class top-1 sweep
-python scripts/evaluate_top1_mask_quality.py \
-  --baseline-kind pytorch \
-  --torch-device mps \
-  --output-dir output/top1-mask-quality-rfdetr-1-8-1-pytorch-class-top1
-
-# Focus one concrete class
-python scripts/evaluate_top1_mask_quality.py \
-  --baseline-kind pytorch \
-  --torch-device mps \
-  --class bird \
-  --output-dir output/top1-mask-quality-rfdetr-1-8-1-pytorch-bird-top1
-```
-
-## Benchmark Evidence And Support Boundary
+## Benchmark Snapshot
 
 Numbers below were measured on Apple M5 Pro 18-core, RF-DETR 1.8.1,
 coremltools 9.0, torch 2.7.0, torchvision 0.22.0, and the repository smoke
 images. They are maintained as a reproducible local snapshot, not a formal
-benchmark suite. Speedup is always relative to PyTorch MPS. Diff columns are
-always relative to the PyTorch reference output, not to another Core ML
-precision target.
-
-Read the tables with this support boundary:
-
-| Target | What the repository evidence supports |
-| --- | --- |
-| Detection FP32 | Conservative default export target. |
-| Detection FP16 | Smoke set: useful latency gains, no class flips for confident detections, one confidence-threshold flip on `large`. |
-| Segmentation FP32 | Smoke set: small raw-output diffs; post-processed mask metrics are not recorded in this snapshot. |
-| Segmentation FP16 | Exportable and fast. Raw tensor deltas are large; the 17-image top-1 mask smoke report is recorded below. |
-
-Promotion criterion for segmentation FP16: post-processed mask metrics on the
-deployment dataset, not raw tensor parity.
+benchmark suite. Speedup is always relative to PyTorch MPS. Detection diff
+columns are always relative to the PyTorch reference output, not to another Core
+ML precision target.
 
 ### Core ML Target Snapshot
 
 Rows group the tested FP32 and FP16 targets by model so the PyTorch MPS baseline
 appears once. The PyTorch MPS column comes from the FP32 latency benchmark.
-FP32 and FP16 latency cells were measured with
-`scripts/benchmark_latency.py --runs 50` using the matching Core ML precision.
-Diff cells were measured with `scripts/test_export.py`.
-
-Diff cells, and the detection decision-change cell, use Core ML
-`ComputeUnit.ALL` and the 17 images included in `scripts/test_images`. Core ML
-latency cells show median latency with speedup relative to PyTorch MPS in
-parentheses. Detection diff is `box / logit / score`. Segmentation raw diff is
-`box / logit / raw mask tensor`, a conversion diagnostic rather than final mask
-IoU.
+Core ML latency cells show median latency with speedup relative to PyTorch MPS
+in parentheses.
 
 #### Detection Targets
+
+Run: `scripts/benchmark_latency.py --runs 50` for latency;
+`scripts/test_export.py` for diff and decision-change cells. Diff cells use
+Core ML `ComputeUnit.ALL` and the 17 images included in `scripts/test_images`.
+Detection diff is `box / logit / score`.
 
 | Model | PyTorch MPS | FP32 ALL | FP32 diff | FP16 ALL | FP16 diff | FP16 decision changes |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
@@ -222,29 +165,30 @@ IoU.
 | Medium | 31.9 ms | 21.0 ms (1.5x) | <0.01 px / 0.0007 / - | 8.2 ms (3.9x) | 3.15 px / 0.3480 / 0.0127 | none |
 | Large | 48.6 ms | 27.8 ms (1.7x) | <0.01 px / 0.0018 / - | 9.8 ms (5.0x) | 1.51 px / 0.2581 / 0.0644 | 1 confidence flip |
 
+Summary: Detection FP32 remains the conservative default. Detection FP16 gives
+useful latency gains in this smoke set; confident queries had no class flips,
+and `large` had one zero-logit confidence-threshold flip while keeping the same
+class argmax.
+
 #### Segmentation Targets
 
-| Model | PyTorch MPS | FP32 ALL | FP32 raw diff (diagnostic) | FP16 ALL | FP16 raw diff (diagnostic) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Seg-Nano | 22.2 ms | 13.1 ms (1.7x) | <0.01 px / <0.0001 / 0.0003 | 6.3 ms (3.5x) | 0.59 px / 0.1673 / 0.7748 |
-| Seg-Small | 28.9 ms | 19.7 ms (1.5x) | <0.01 px / 0.0001 / 0.0001 | 8.2 ms (3.5x) | 101.87 px / 8.2739 / 28.4923 |
-| Seg-Medium | 39.7 ms | 26.0 ms (1.5x) | <0.01 px / 0.0004 / 0.0007 | 11.3 ms (3.5x) | 174.02 px / 9.7005 / 96.0324 |
-| Seg-Large | 57.1 ms | 32.6 ms (1.8x) | <0.01 px / 0.0037 / 0.0049 | 14.4 ms (4.0x) | 112.35 px / 5.7367 / 17.5418 |
-| Seg-XLarge | 94.7 ms | 66.1 ms (1.4x) | <0.01 px / 0.0002 / 0.0004 | 25.7 ms (3.7x) | 295.22 px / 7.7803 / 106.7567 |
-| Seg-2XLarge | 174.7 ms | 144.6 ms (1.2x) | 0.54 px / 0.0353 / 0.1695 | 54.8 ms (3.2x) | 635.54 px / 8.1293 / 100.3076 |
+Run: `scripts/benchmark_latency.py --runs 50`.
 
-For detection `medium`, one confident query on `test_image_17.jpg` reached
-3.15 px box diff. For detection `large`, one `test_image_17.jpg` query crossed
-the zero-logit confidence boundary while keeping the same class argmax. Those
-are product-adjacent detection checks because they measure the selected class
-and threshold state.
+| Model | PyTorch MPS | FP32 ALL | FP16 ALL |
+| --- | ---: | ---: | ---: |
+| Seg-Nano | 22.2 ms | 13.1 ms (1.7x) | 6.3 ms (3.5x) |
+| Seg-Small | 28.9 ms | 19.7 ms (1.5x) | 8.2 ms (3.5x) |
+| Seg-Medium | 39.7 ms | 26.0 ms (1.5x) | 11.3 ms (3.5x) |
+| Seg-Large | 57.1 ms | 32.6 ms (1.8x) | 14.4 ms (4.0x) |
+| Seg-XLarge | 94.7 ms | 66.1 ms (1.4x) | 25.7 ms (3.7x) |
+| Seg-2XLarge | 174.7 ms | 144.6 ms (1.2x) | 54.8 ms (3.2x) |
 
-The segmentation raw-diff values above help investigate conversion drift.
-Mask-level results are below.
+Summary: Segmentation FP16 is exportable and faster in this latency snapshot.
+This table is latency-only; mask quality is measured in the top-1 table below.
 
 #### Segmentation FP16 Top-1 Mask Smoke Results
 
-The current RF-DETR 1.8.1 top-1 mask runs used PyTorch MPS as the baseline,
+Run: `scripts/evaluate_top1_mask_quality.py`, with PyTorch MPS as the baseline,
 Core ML FP16 with `ComputeUnit.ALL` as the candidate, class confidence `>= 0.5`,
 raw mask logit `> 0` for binarization, and the 17 repository smoke images.
 
@@ -270,8 +214,8 @@ Bird class:
 | seg-xlarge | 12/17 | 0 | 0.9965 | 0.9799 | 0.9982 | 1.00 | 1.98 |
 | seg-2xlarge | 13/17 | 0 | 0.9965 | 0.9835 | 0.9982 | 1.00 | 1.65 |
 
-No baseline-accepted bird or per-class top-1 mask fell below `0.95` IoU on this
-smoke set. The observed confidence-threshold flips were `seg-large` bird
+Summary: No baseline-accepted bird or per-class top-1 mask fell below `0.95`
+IoU on this smoke set. The observed confidence-threshold flips were `seg-large` bird
 `test_image_13.jpg` (`0.503 -> 0.492`) and `seg-2xlarge` person
 `test_image_17.jpg` (`0.424 -> 0.501`). The `seg-xlarge` all-class boundary
 outlier keeps high overlap (`0.9850` IoU, `1.33%` area change).
@@ -279,8 +223,9 @@ outlier keeps high overlap (`0.9850` IoU, `1.33%` area change).
 #### FP16 Compute Unit Latency
 
 Core ML exposes combined compute-unit modes, not GPU-only or ANE-only modes.
-`FP16 GPU` below means `CPU_AND_GPU`; `FP16 NE` means `CPU_AND_NE`. These rows
-are latency-only measurements from
+`FP16 GPU` below means `CPU_AND_GPU`; `FP16 NE` means `CPU_AND_NE`.
+
+Run:
 `scripts/benchmark_latency.py --precision fp16 --runs 50`, using
 `scripts/test_images/test_image_01.jpg` resized to each model resolution.
 This is a separate latency session with its own PyTorch MPS baseline, so compare
@@ -308,6 +253,9 @@ Segmentation:
 | Seg-XLarge | 93.2 ms | 25.7 ms (3.6x) | 22.6 ms (4.1x) | 102.4 ms (0.9x) |
 | Seg-2XLarge | 163.8 ms | 54.8 ms (3.0x) | 53.6 ms (3.1x) | 237.6 ms (0.7x) |
 
+Summary: `ALL` and `CPU_AND_GPU` are the useful FP16 modes in this snapshot.
+`CPU_AND_NE` is slower for the larger segmentation models.
+
 To explore partial FP16 conversion instead of validating a final target, run the
 mixed-precision scan harness:
 
@@ -316,6 +264,8 @@ python scripts/scan_fp16_precision.py --model nano --output-dir output/fp16-scan
 ```
 
 ### Direct Core ML vs ONNX Runtime
+
+Run: `scripts/benchmark_onnx.py`.
 
 The ONNX benchmark script uses the installed RF-DETR official ONNX exporter in
 a patch-isolated subprocess, then compares ONNX Runtime against this project's
@@ -332,12 +282,10 @@ Detection-only ONNX benchmark, same machine and dependency versions as above,
 | Medium | 103.0 ms | 154.6 ms | 38.6 ms | 18.9 ms | 0.00-0.15 px |
 | Large | 169.5 ms | 246.6 ms | 45.8 ms | 30.0 ms | 0.00-0.14 px |
 
-The box diff range is measured in pixels over confident PyTorch reference
-queries. ONNX rows compare against RF-DETR's official PyTorch export reference;
-Direct Core ML FP32 ALL compares against this project's patched PyTorch
-reference. The range is for the ONNX comparison table, not the standalone
-Direct Core ML FP32 diff shown in the target snapshot above. Segmentation ONNX
-benchmarks are not included because mask-output handling is not implemented in
+Summary: Direct Core ML FP32 ALL is faster than ONNX Runtime's Core ML EP
+MLProgram FP32 ALL in this snapshot. The box diff range is measured in pixels
+over confident PyTorch reference queries; segmentation ONNX benchmarks are not
+included because mask-output handling is not implemented in
 `scripts/benchmark_onnx.py`.
 
 ## Runtime And Deployment Notes
