@@ -12,6 +12,7 @@ import ast
 import importlib.metadata as metadata
 import io
 import json
+from pathlib import Path
 import socket
 import sys
 
@@ -28,6 +29,8 @@ EXPECTED_MODELS = {
     "seg-xlarge",
     "seg-2xlarge",
 }
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 @contextmanager
@@ -67,6 +70,47 @@ def check_versions() -> None:
     assert versions["rfdetr"] == "1.8.1", versions
     assert versions["torch"] == "2.7.0", versions
     assert versions["torchvision"] == "0.22.0", versions
+
+
+def check_documentation_provenance() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    docs = {
+        "README.md": readme,
+        "CHANGELOG.md": changelog,
+    }
+
+    required_snippets = {
+        "README.md": [
+            "The current tested compatibility baseline is RF-DETR 1.8.1, "
+            "Core ML Tools 9.0, and torch 2.7.0.",
+            "The package targets released `coremltools` 9.0 and `rfdetr` 1.8.1.",
+            "Numbers below were measured on Apple M5 Pro 18-core, RF-DETR 1.7.1, "
+            "coremltools 9.0, and real test images.",
+            "The ONNX benchmark script uses RF-DETR 1.7.1's official ONNX exporter",
+        ],
+        "CHANGELOG.md": [
+            "`coremltools==9.0`, `rfdetr==1.8.1`, `torch==2.7.0`, and",
+            "Kept the existing latency, diff, FP16, and ONNX benchmark measurements "
+            "labeled as RF-DETR 1.7.1 provenance.",
+        ],
+    }
+
+    for filename, snippets in required_snippets.items():
+        text = " ".join(docs[filename].split())
+        missing = [snippet for snippet in snippets if snippet not in text]
+        assert not missing, f"{filename} missing documentation provenance snippets: {missing}"
+
+    forbidden_phrases = [
+        "keypoint support",
+        "keypoint export",
+        "keypoint model",
+        "keypoint outputs",
+    ]
+    for filename, text in docs.items():
+        lowered = text.lower()
+        matches = [phrase for phrase in forbidden_phrases if phrase in lowered]
+        assert not matches, f"{filename} contains unsupported keypoint wording: {matches}"
 
 
 def check_registry(model_registry, import_model_class) -> None:
@@ -213,6 +257,7 @@ def check_required_rfdetr_patches() -> None:
 
 
 def main() -> None:
+    check_documentation_provenance()
     with network_disabled():
         import rfdetr_coreml
         import rfdetr_coreml.export as export_module

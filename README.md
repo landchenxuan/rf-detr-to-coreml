@@ -8,8 +8,8 @@ and applies a small runtime patch overlay for RF-DETR/coremltools conversion
 gaps. The conservative production path is FP32 Core ML running on Apple GPU.
 FP16 ML Program export is also supported and can change Core ML accelerator
 coverage, but accuracy is model/checkpoint-specific and should be validated
-with the FP16 scripts below. The current tested baseline is RF-DETR 1.7.1,
-coremltools 9.0, and torch 2.7.0.
+with the FP16 scripts below. The current tested compatibility baseline is
+RF-DETR 1.8.1, Core ML Tools 9.0, and torch 2.7.0.
 
 ## Should You Use This?
 
@@ -65,8 +65,8 @@ weights, FP16 exports, larger batches, or exporting every variant.
 | `--weights` | None | Path to fine-tuned `.pth` weights |
 | `--batch-size` | `1` | `1` uses Core ML `ImageType`; larger batches use `TensorType` NCHW float32 input in `[0, 1]` |
 
-The package targets released `coremltools` 9.0 and `rfdetr` 1.7.1. Deprecated
-RF-DETR 1.7 variants such as `base` and `seg-preview` are not supported.
+The package targets released `coremltools` 9.0 and `rfdetr` 1.8.1. Deprecated
+variants such as `base` and `seg-preview` are not supported.
 
 For measured FP32 and FP16 target deltas, see
 [Core ML Target Snapshot](#core-ml-target-snapshot). FP16 suitability is
@@ -269,7 +269,7 @@ python scripts/scan_fp16_precision.py --model nano --output-dir output/fp16-scan
 
 ### Direct Core ML vs ONNX Runtime
 
-The ONNX benchmark script uses RF-DETR 1.7's official ONNX exporter in a
+The ONNX benchmark script uses RF-DETR 1.7.1's official ONNX exporter in a
 patch-isolated subprocess, then compares ONNX Runtime against this project's
 direct Core ML path.
 
@@ -313,7 +313,7 @@ converter hit a few specific boundaries:
 - RF-DETR export returns tuples, while normal model inference returns dicts.
 - Current released `coremltools` versions still need fixes for a few Torch
   frontend edge cases used by RF-DETR.
-- RF-DETR 1.7.x segmentation uses a custom autograd function that traces as a
+- RF-DETR segmentation uses a custom autograd function that traces as a
   PythonOp.
 
 The package applies runtime monkey patches on import:
@@ -324,7 +324,7 @@ The package applies runtime monkey patches on import:
 - DinoV2 bicubic interpolation is switched to bilinear during export.
 - `coremltools` Torch frontend fixes are applied for `_cast`, `view`, and
   `meshgrid`.
-- The RF-DETR 1.7.x segmentation depthwise-conv custom autograd function is
+- The RF-DETR segmentation depthwise-conv custom autograd function is
   replaced with plain `F.conv2d` for export.
 
 Importing `rfdetr_coreml` applies the patch overlay:

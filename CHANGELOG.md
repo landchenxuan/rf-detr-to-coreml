@@ -7,15 +7,17 @@ All notable changes to this project are recorded here.
 ### Changed
 
 - Target released PyPI packages for the compatibility baseline:
-  `coremltools==9.0`, `rfdetr==1.7.1`, `torch==2.7.0`, and
+  `coremltools==9.0`, `rfdetr==1.8.1`, `torch==2.7.0`, and
   `torchvision==0.22.0`.
 - Simplified the README around install, export, verification, production notes,
   and the patch overlay.
-- Updated export documentation for RF-DETR 1.7's official ONNX/TFLite paths and
+- Updated export documentation for RF-DETR's official ONNX/TFLite paths and
   switched the ONNX benchmark helper to RF-DETR's official ONNX exporter.
-- Removed deprecated RF-DETR 1.7 variants from the supported model registry.
+- Removed deprecated upstream variants from the supported model registry.
 - Refreshed the README latency snapshot for RF-DETR 1.7.1 on Apple M5 Pro
   18-core using real test images.
+- Kept the existing latency, diff, FP16, and ONNX benchmark measurements
+  labeled as RF-DETR 1.7.1 provenance.
 - Added a README ONNX detection benchmark table and aligned ONNX benchmark box
   diffs with the confident-query accuracy checks used by `test_export.py`.
 - Updated FP16 guidance from raw-query diffing to detection-oriented equivalence:
