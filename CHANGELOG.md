@@ -7,15 +7,16 @@ All notable changes to this project are recorded here.
 ### Changed
 
 - Target released PyPI packages for the compatibility baseline:
-  `coremltools==9.0`, `rfdetr==1.7.1`, `torch==2.7.0`, and
+  `coremltools==9.0`, `rfdetr==1.8.1`, `torch==2.7.0`, and
   `torchvision==0.22.0`.
 - Simplified the README around install, export, verification, production notes,
   and the patch overlay.
-- Updated export documentation for RF-DETR 1.7's official ONNX/TFLite paths and
+- Updated export documentation for RF-DETR's official ONNX/TFLite paths and
   switched the ONNX benchmark helper to RF-DETR's official ONNX exporter.
-- Removed deprecated RF-DETR 1.7 variants from the supported model registry.
-- Refreshed the README latency snapshot for RF-DETR 1.7.1 on Apple M5 Pro
-  18-core using real test images.
+- Removed deprecated upstream variants from the supported model registry.
+- Refreshed the README latency, diff, FP16, and ONNX benchmark snapshots for
+  RF-DETR 1.8.1 on Apple M5 Pro 18-core using real test images.
+- Added pinned ONNX benchmark reproduction dependencies to `requirements.txt`.
 - Added a README ONNX detection benchmark table and aligned ONNX benchmark box
   diffs with the confident-query accuracy checks used by `test_export.py`.
 - Updated FP16 guidance from raw-query diffing to detection-oriented equivalence:
@@ -29,10 +30,10 @@ All notable changes to this project are recorded here.
 ### Fixed
 
 - Updated the detection `large` registry entry to `RFDETRLarge`, matching
-  released `rfdetr` 1.7.1.
+  released `rfdetr` 1.8.1.
 - Recorded installed `rfdetr` and `coremltools` versions in Core ML metadata
   instead of hardcoding the stale RF-DETR 1.5.1 version.
-- Supported RF-DETR 1.7.x segmentation export by replacing the export-time
+- Supported current RF-DETR segmentation export by replacing the export-time
   depthwise-conv custom autograd path with a Core ML-convertible equivalent.
 - Kept the released `coremltools` 9.0 meshgrid workaround in place.
 - Corrected the FP16 validation narrative that treated low-confidence unmatched

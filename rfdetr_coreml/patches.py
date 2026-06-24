@@ -5,7 +5,7 @@ Four patches are applied:
   A) MSDeformAttn.forward — merge batch+heads to keep tensors ≤ rank-5
   B) ms_deform_attn_core_pytorch — accept 5D (batch*heads merged) inputs
   C) Bicubic → bilinear interpolation in DinoV2 backbone pos-encoding
-  D) RF-DETR 1.7 segmentation depthwise-conv PythonOp → plain F.conv2d
+  D) RF-DETR segmentation depthwise-conv PythonOp → plain F.conv2d
 """
 
 import logging
@@ -32,7 +32,7 @@ def _ms_deform_attn_core_5d(value, value_spatial_shapes, sampling_locations, att
         value_spatial_shapes: (L, 2) — [(H_0, W_0), ...]
         sampling_locations: (B*H, Len_q, L, P, 2) — 5D
         attention_weights: (B*H, Len_q, L*P)
-        spatial_shapes_hw: optional list of Python-int (H, W) pairs (rfdetr >=1.7).
+        spatial_shapes_hw: optional list of Python-int (H, W) pairs from RF-DETR.
             When provided, used for split/view so concrete ints reach trace.
     Returns:
         (B*H, Len_q, head_dim)
@@ -81,7 +81,7 @@ def _msdeformattn_forward_5d(self, query, reference_points, input_flatten,
     """
     MSDeformAttn.forward with rank ≤ 5 tensors (batch+heads merged).
 
-    ``input_spatial_shapes_hw`` (rfdetr >=1.7) carries Python-int (H, W) pairs
+    ``input_spatial_shapes_hw`` carries Python-int (H, W) pairs
     for trace-friendly split/view; forwarded to the core function.
     """
     N, Len_q, _ = query.shape
@@ -243,9 +243,18 @@ def _patch_segmentation_depthwise_conv():
     """
     try:
         from rfdetr.models.heads import segmentation as seg_mod
-    except ImportError:
-        logger.warning("segmentation head not found; skipping depthwise-conv patch")
-        return
+    except ImportError as exc:
+        raise RuntimeError(
+            "Required RF-DETR segmentation module is missing; "
+            "the CoreML patch overlay is incompatible with this rfdetr release."
+        ) from exc
+
+    if not hasattr(seg_mod, "_DepthwiseConvWithoutCuDNN"):
+        raise RuntimeError(
+            "Required RF-DETR segmentation symbol "
+            "_DepthwiseConvWithoutCuDNN is missing; the CoreML patch overlay "
+            "is incompatible with this rfdetr release."
+        )
 
     class _PlainDepthwiseConv:
         @staticmethod
@@ -267,26 +276,30 @@ def apply_rfdetr_patches() -> None:
       A) MSDeformAttn.forward — merge batch+heads to keep tensors ≤ rank-5
       B) ms_deform_attn_core — accept 5D (batch*heads merged) inputs
       C) DinoV2 interpolation — bicubic → bilinear
-      D) RF-DETR 1.7 segmentation depthwise-conv PythonOp → plain F.conv2d
+      D) RF-DETR segmentation depthwise-conv PythonOp → plain F.conv2d
     """
     global _applied
     if _applied:
         return
+
+    try:
+        # Patch A: MSDeformAttn.forward
+        from rfdetr.models.ops.modules.ms_deform_attn import MSDeformAttn
+        MSDeformAttn.forward = _msdeformattn_forward_5d
+        logger.info("Patched MSDeformAttn.forward (6D → 5D)")
+
+        # Patch B is used internally by Patch A (no separate module-level patch needed)
+        # The _ms_deform_attn_core_5d function replaces ms_deform_attn_core_pytorch
+        # but is called directly from the patched forward, not imported by name.
+
+        # Patch C: bicubic → bilinear
+        _patch_bicubic_to_bilinear()
+
+        # Patch D: segmentation-head custom autograd Function → plain conv2d
+        _patch_segmentation_depthwise_conv()
+    except Exception:
+        _applied = False
+        raise
+
     _applied = True
-
-    # Patch A: MSDeformAttn.forward
-    from rfdetr.models.ops.modules.ms_deform_attn import MSDeformAttn
-    MSDeformAttn.forward = _msdeformattn_forward_5d
-    logger.info("Patched MSDeformAttn.forward (6D → 5D)")
-
-    # Patch B is used internally by Patch A (no separate module-level patch needed)
-    # The _ms_deform_attn_core_5d function replaces ms_deform_attn_core_pytorch
-    # but is called directly from the patched forward, not imported by name.
-
-    # Patch C: bicubic → bilinear
-    _patch_bicubic_to_bilinear()
-
-    # Patch D: segmentation-head custom autograd Function → plain conv2d
-    _patch_segmentation_depthwise_conv()
-
     logger.info("All rfdetr CoreML patches applied")
