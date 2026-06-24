@@ -54,15 +54,19 @@ def network_disabled():
 def check_versions() -> None:
     import coremltools as ct
     import torch
+    import torchvision
 
     versions = {
-        "torch": torch.__version__,
+        "torch": torch.__version__.split("+", 1)[0],
+        "torchvision": torchvision.__version__.split("+", 1)[0],
         "coremltools": ct.__version__,
         "rfdetr": metadata.version("rfdetr"),
     }
     print("dependency versions:", versions)
     assert versions["coremltools"] == "9.0", versions
-    assert versions["rfdetr"] == "1.7.1", versions
+    assert versions["rfdetr"] == "1.8.1", versions
+    assert versions["torch"] == "2.7.0", versions
+    assert versions["torchvision"] == "0.22.0", versions
 
 
 def check_registry(model_registry, import_model_class) -> None:

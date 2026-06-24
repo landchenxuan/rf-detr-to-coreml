@@ -5,4 +5,4 @@
 torch==2.7.0
 torchvision==0.22.0
 coremltools==9.0
-rfdetr==1.7.1
+rfdetr==1.8.1
