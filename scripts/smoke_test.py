@@ -188,6 +188,30 @@ def check_class_metadata(export_module) -> None:
     assert json.loads(rfdetr15_metadata["class_mapping"]) == {"1": "person", "18": "dog"}
 
 
+def check_required_rfdetr_patches() -> None:
+    import rfdetr_coreml.patches as patches
+    from rfdetr.models.heads import segmentation as seg_mod
+
+    original_target = seg_mod._DepthwiseConvWithoutCuDNN
+    assert original_target.__module__ == "rfdetr_coreml.patches", original_target
+
+    del seg_mod._DepthwiseConvWithoutCuDNN
+    patches._applied = False
+    try:
+        try:
+            patches.apply_rfdetr_patches()
+        except RuntimeError as exc:
+            assert "segmentation" in str(exc).lower(), exc
+            assert "_DepthwiseConvWithoutCuDNN" in str(exc), exc
+            assert patches._applied is False
+        else:
+            raise AssertionError("missing segmentation depthwise target did not fail early")
+    finally:
+        seg_mod._DepthwiseConvWithoutCuDNN = original_target
+        patches._applied = False
+        patches.apply_rfdetr_patches()
+
+
 def main() -> None:
     with network_disabled():
         import rfdetr_coreml
@@ -199,6 +223,7 @@ def main() -> None:
         check_registry(MODEL_REGISTRY, _import_model_class)
         check_cli_help()
         check_class_metadata(export_module)
+        check_required_rfdetr_patches()
     print("smoke: ok")
 
 

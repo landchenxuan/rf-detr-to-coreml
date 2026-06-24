@@ -7,7 +7,7 @@ Importing this package automatically applies all necessary patches:
   3. coremltools meshgrid op workaround
   4. Deformable attention 6D → 5D tensor fix
   5. Bicubic → bilinear interpolation fix
-  6. RF-DETR 1.7 segmentation PythonOp workaround
+  6. Supported RF-DETR segmentation PythonOp workaround
 """
 
 __all__ = ["export_to_coreml", "MODEL_REGISTRY"]
