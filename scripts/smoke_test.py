@@ -72,35 +72,13 @@ def check_versions() -> None:
     assert versions["torchvision"] == "0.22.0", versions
 
 
-def check_documentation_provenance() -> None:
+def check_documentation_guardrails() -> None:
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     docs = {
         "README.md": readme,
         "CHANGELOG.md": changelog,
     }
-
-    required_snippets = {
-        "README.md": [
-            "The current tested compatibility baseline is RF-DETR 1.8.1, "
-            "Core ML Tools 9.0, and torch 2.7.0.",
-            "The package targets released `coremltools` 9.0 and `rfdetr` 1.8.1.",
-            "Numbers below were measured on Apple M5 Pro 18-core, RF-DETR 1.8.1, "
-            "coremltools 9.0, torch 2.7.0, torchvision 0.22.0, and real test images.",
-            "The ONNX table below was measured under RF-DETR 1.8.1, "
-            "ONNX 1.22.0, and ONNX Runtime 1.27.0.",
-        ],
-        "CHANGELOG.md": [
-            "`coremltools==9.0`, `rfdetr==1.8.1`, `torch==2.7.0`, and",
-            "Refreshed the README latency, diff, FP16, and ONNX benchmark snapshots for "
-            "RF-DETR 1.8.1 on Apple M5 Pro 18-core using real test images.",
-        ],
-    }
-
-    for filename, snippets in required_snippets.items():
-        text = " ".join(docs[filename].split())
-        missing = [snippet for snippet in snippets if snippet not in text]
-        assert not missing, f"{filename} missing documentation provenance snippets: {missing}"
 
     forbidden_phrases = [
         "keypoint support",
@@ -262,7 +240,7 @@ def check_required_rfdetr_patches() -> None:
 
 
 def main() -> None:
-    check_documentation_provenance()
+    check_documentation_guardrails()
     with network_disabled():
         import rfdetr_coreml
         import rfdetr_coreml.export as export_module

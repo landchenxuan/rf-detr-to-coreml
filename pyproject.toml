@@ -39,6 +39,7 @@ dependencies = [
     "torchvision>=0.22.0,<0.23",
     "coremltools>=9.0,<10",
     "rfdetr>=1.8.1,<1.9",
+    "scipy>=1.10,<2",
 ]
 
 [project.scripts]
