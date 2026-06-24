@@ -6,10 +6,10 @@ segmentation models to Apple Core ML.
 This project converts RF-DETR directly from PyTorch to Core ML's ML Program format
 and applies a small runtime patch overlay for RF-DETR/coremltools conversion
 gaps. The conservative production path is FP32 Core ML running on Apple GPU.
-FP16 ML Program export is also supported and can change Core ML accelerator
-coverage, but accuracy is model/checkpoint-specific and should be validated
-with the FP16 scripts below. The current tested compatibility baseline is
-RF-DETR 1.8.1, Core ML Tools 9.0, and torch 2.7.0.
+FP16 ML Program export is available; current precision evidence is summarized in
+[Benchmark Evidence And Support Boundary](#benchmark-evidence-and-support-boundary).
+The current tested compatibility baseline is RF-DETR 1.8.1, Core ML Tools 9.0,
+and torch 2.7.0.
 
 ## Should You Use This?
 
@@ -19,9 +19,10 @@ upstream exporters when your target runtime is ONNX Runtime, TensorRT,
 OpenVINO, TFLite, or another cross-platform stack.
 
 The direct Core ML path matters because the RF-DETR/Core ML compatibility fixes
-are applied before conversion, and the resulting Core ML package was faster
-than ONNX Runtime's Core ML Execution Provider in this project's benchmarks.
-The detailed comparison is in the performance section below.
+are applied before conversion, and the resulting detection Core ML packages
+were faster than ONNX Runtime's Core ML Execution Provider in this project's
+local latency snapshots. The detailed comparison is in the evidence section
+below.
 
 ## Install
 
@@ -61,7 +62,7 @@ weights, FP16 exports, larger batches, or exporting every variant.
 | Option | Default | Notes |
 | --- | --- | --- |
 | `--model` | `nano` | Detection: `nano`, `small`, `medium`, `large`; segmentation: `seg-nano`, `seg-small`, `seg-medium`, `seg-large`, `seg-xlarge`, `seg-2xlarge`; or `all` |
-| `--precision` | `fp32` | `fp32` is the conservative fallback. For `fp16`, benchmark `ALL`/GPU/NE compute units and validate accuracy for your model and weights. |
+| `--precision` | `fp32` | `fp32` is the conservative fallback. `fp16` creates ML Program packages; see the evidence section for current validation status. |
 | `--output-dir` | `output` | Output directory for `.mlpackage` files |
 | `--weights` | None | Path to fine-tuned `.pth` weights |
 | `--batch-size` | `1` | `1` uses Core ML `ImageType`; larger batches use `TensorType` NCHW float32 input in `[0, 1]` |
@@ -70,8 +71,7 @@ The package targets released `coremltools` 9.0 and `rfdetr` 1.8.1. Deprecated
 variants such as `base` and `seg-preview` are not supported.
 
 For measured FP32 and FP16 target deltas, see
-[Core ML Target Snapshot](#core-ml-target-snapshot). FP16 suitability is
-model/checkpoint-specific, so validate it on your own data before shipping.
+[Core ML Target Snapshot](#core-ml-target-snapshot).
 
 ## Model Inputs And Outputs
 
@@ -120,12 +120,14 @@ invent labels.
 
 ## Validate This Target
 
-Validate by generating a Core ML vs PyTorch report on real images. The primary
-workflow is report-first: inspect the max diffs, then decide whether they meet
-your product tolerance. Threshold flags are optional CI gates after you choose
-your own acceptance criteria. Use `scripts/test_export.py` as the final target
-validation entrypoint; `scripts/scan_fp16_precision.py` is only for
-mixed-precision exploration.
+Validation reports are split by output surface:
+
+| Script | Reported surface |
+| --- | --- |
+| `scripts/test_export.py` | Raw Core ML vs PyTorch export tensor diffs: boxes, logits, and masks. It also reports detection class/confidence changes. |
+| `scripts/evaluate_top1_mask_quality.py` | Post-processed segmentation top-1 mask metrics: IoU, Dice, boundary distance, centroid shift, area change, and confidence flips. |
+
+The bundled image set is `scripts/test_images`, a 17-image smoke/regression set.
 
 ```bash
 # FP32 or FP16 exported target report: boxes/logits, plus masks for segmentation
@@ -135,14 +137,14 @@ python scripts/test_export.py --model nano --precision fp32 --output-dir output 
 python scripts/test_export.py --model segmentation --precision fp16 --output-dir output/fp16-seg-tests --torch-device mps
 ```
 
-Report fields:
+`scripts/test_export.py` report fields:
 
 | Metric | Meaning |
 | --- | --- |
 | `Box Diff` / `max_box_diff_px` | Maximum confident-query box delta in pixels |
 | `Logit Diff` / `max_logit_diff` | Maximum raw-logit delta for confident PyTorch queries |
 | `Score` / `max_score_diff` | Maximum sigmoid score delta |
-| `Mask Diff` / `max_mask_diff` | Maximum mask tensor delta for segmentation models |
+| `Mask Diff` / `max_mask_diff` | Maximum raw mask tensor delta for segmentation models |
 | `Class` / `class_argmax_changes` | Count of confident queries whose top class changed |
 | `Conf` / `confidence_state_changes` | Count of queries crossing the zero-logit confidence boundary |
 
@@ -158,46 +160,58 @@ Common `scripts/test_export.py` options:
 | `--compute-unit` | Core ML compute unit for validation: `all`, `cpu_and_gpu`, `cpu_and_ne`, or `cpu_only` |
 | `--max-box-diff-px`, `--max-logit-diff`, `--max-score-diff`, `--max-mask-diff` | Optional CI gates; omit them for report-only validation |
 
-Use `--torch-device auto` to use MPS when available and CPU otherwise. To report
-FP16 segmentation parity, use
-`scripts/test_export.py --model segmentation --precision fp16`; the current
-FP16 segmentation results are summarized below.
+Top-1 mask report:
 
-The checks compare confident PyTorch reference detections and separately track
-class flips plus confidence-threshold flips. They intentionally do not use
-raw low-confidence unmatched queries as pass/fail detections. The included test
-images are a limited smoke/regression set, so FP16 suitability must be tested on
-your own validation data, model weights, confidence thresholds, and
-post-processing pipeline.
+```bash
+# Default all-class top-1 sweep
+python scripts/evaluate_top1_mask_quality.py \
+  --baseline-kind pytorch \
+  --torch-device mps \
+  --output-dir output/top1-mask-quality-rfdetr-1-8-1-pytorch-class-top1
 
-## Performance And Accuracy Evidence
+# Focus one concrete class
+python scripts/evaluate_top1_mask_quality.py \
+  --baseline-kind pytorch \
+  --torch-device mps \
+  --class bird \
+  --output-dir output/top1-mask-quality-rfdetr-1-8-1-pytorch-bird-top1
+```
+
+## Benchmark Evidence And Support Boundary
 
 Numbers below were measured on Apple M5 Pro 18-core, RF-DETR 1.8.1,
-coremltools 9.0, torch 2.7.0, torchvision 0.22.0, and real test images.
-Speedup is always relative to PyTorch MPS. Diff columns are always relative to
-the PyTorch reference output, not to another Core ML precision target.
+coremltools 9.0, torch 2.7.0, torchvision 0.22.0, and the repository smoke
+images. They are maintained as a reproducible local snapshot, not a formal
+benchmark suite. Speedup is always relative to PyTorch MPS. Diff columns are
+always relative to the PyTorch reference output, not to another Core ML
+precision target.
+
+Read the tables with this support boundary:
+
+| Target | What the repository evidence supports |
+| --- | --- |
+| Detection FP32 | Conservative default export target. |
+| Detection FP16 | Smoke set: useful latency gains, no class flips for confident detections, one confidence-threshold flip on `large`. |
+| Segmentation FP32 | Smoke set: small raw-output diffs; post-processed mask metrics are not recorded in this snapshot. |
+| Segmentation FP16 | Exportable and fast. Raw tensor deltas are large; the 17-image top-1 mask smoke report is recorded below. |
+
+Promotion criterion for segmentation FP16: post-processed mask metrics on the
+deployment dataset, not raw tensor parity.
 
 ### Core ML Target Snapshot
 
-Rows group the tested FP32 and FP16 targets by model so the PyTorch MPS
-baseline appears once. The PyTorch MPS column comes from the FP32 latency
-benchmark. FP32 and FP16 latency cells were measured with
+Rows group the tested FP32 and FP16 targets by model so the PyTorch MPS baseline
+appears once. The PyTorch MPS column comes from the FP32 latency benchmark.
+FP32 and FP16 latency cells were measured with
 `scripts/benchmark_latency.py --runs 50` using the matching Core ML precision.
-FP32 and FP16 diff cells were measured with `scripts/test_export.py`.
+Diff cells were measured with `scripts/test_export.py`.
 
 Diff cells, and the detection decision-change cell, use Core ML
 `ComputeUnit.ALL` and the 17 images included in `scripts/test_images`. Core ML
 latency cells show median latency with speedup relative to PyTorch MPS in
-parentheses. Diff cells group the max deltas for that target and are always
-relative to the PyTorch reference output. Detection diff is
-`box / logit / score`; segmentation diff is `box / logit / mask`. For
-detection, `FP16 decision changes` reports class flips and confidence-threshold
-flips after FP16 conversion; `none` means neither changed for confident PyTorch
-reference queries.
-
-This table is descriptive, not a support matrix. The included test images are a
-limited smoke/regression set, so FP16 suitability must be validated on your own
-data, model weights, confidence thresholds, and post-processing pipeline.
+parentheses. Detection diff is `box / logit / score`. Segmentation raw diff is
+`box / logit / raw mask tensor`, a conversion diagnostic rather than final mask
+IoU.
 
 #### Detection Targets
 
@@ -210,7 +224,7 @@ data, model weights, confidence thresholds, and post-processing pipeline.
 
 #### Segmentation Targets
 
-| Model | PyTorch MPS | FP32 ALL | FP32 diff | FP16 ALL | FP16 diff |
+| Model | PyTorch MPS | FP32 ALL | FP32 raw diff (diagnostic) | FP16 ALL | FP16 raw diff (diagnostic) |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Seg-Nano | 22.2 ms | 13.1 ms (1.7x) | <0.01 px / <0.0001 / 0.0003 | 6.3 ms (3.5x) | 0.59 px / 0.1673 / 0.7748 |
 | Seg-Small | 28.9 ms | 19.7 ms (1.5x) | <0.01 px / 0.0001 / 0.0001 | 8.2 ms (3.5x) | 101.87 px / 8.2739 / 28.4923 |
@@ -221,10 +235,46 @@ data, model weights, confidence thresholds, and post-processing pipeline.
 
 For detection `medium`, one confident query on `test_image_17.jpg` reached
 3.15 px box diff. For detection `large`, one `test_image_17.jpg` query crossed
-the zero-logit confidence boundary while keeping the same class argmax. FP16
-segmentation produced large box, mask, class, and confidence-state deltas in
-this limited snapshot; treat it as investigation evidence unless you introduce
-a different mixed-precision strategy and validate masks on your own data.
+the zero-logit confidence boundary while keeping the same class argmax. Those
+are product-adjacent detection checks because they measure the selected class
+and threshold state.
+
+The segmentation raw-diff values above help investigate conversion drift.
+Mask-level results are below.
+
+#### Segmentation FP16 Top-1 Mask Smoke Results
+
+The current RF-DETR 1.8.1 top-1 mask runs used PyTorch MPS as the baseline,
+Core ML FP16 with `ComputeUnit.ALL` as the candidate, class confidence `>= 0.5`,
+raw mask logit `> 0` for binarization, and the 17 repository smoke images.
+
+All-class top-1 sweep:
+
+| Model | Accepted/Cases | Conf flips | Mean IoU | Min IoU | Mean Dice | Max boundary p95 px | Max area change % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| seg-nano | 15/15 | 0 | 0.9992 | 0.9956 | 0.9996 | 0.00 | 0.44 |
+| seg-small | 16/16 | 0 | 0.9987 | 0.9917 | 0.9994 | 1.00 | 0.82 |
+| seg-medium | 17/17 | 0 | 0.9946 | 0.9749 | 0.9973 | 2.24 | 2.32 |
+| seg-large | 15/15 | 1 | 0.9991 | 0.9961 | 0.9995 | 1.00 | 0.29 |
+| seg-xlarge | 15/15 | 0 | 0.9951 | 0.9799 | 0.9975 | 72.66 | 1.98 |
+| seg-2xlarge | 16/17 | 1 | 0.9962 | 0.9835 | 0.9981 | 1.00 | 1.65 |
+
+Bird class:
+
+| Model | Accepted/Cases | Conf flips | Mean IoU | Min IoU | Mean Dice | Max boundary p95 px | Max area change % |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| seg-nano | 12/17 | 0 | 0.9993 | 0.9956 | 0.9997 | 0.00 | 0.44 |
+| seg-small | 13/17 | 0 | 0.9991 | 0.9971 | 0.9996 | 0.00 | 0.29 |
+| seg-medium | 14/17 | 0 | 0.9973 | 0.9889 | 0.9987 | 1.00 | 1.13 |
+| seg-large | 13/17 | 1 | 0.9994 | 0.9983 | 0.9997 | 0.00 | 0.17 |
+| seg-xlarge | 12/17 | 0 | 0.9965 | 0.9799 | 0.9982 | 1.00 | 1.98 |
+| seg-2xlarge | 13/17 | 0 | 0.9965 | 0.9835 | 0.9982 | 1.00 | 1.65 |
+
+No baseline-accepted bird or per-class top-1 mask fell below `0.95` IoU on this
+smoke set. The observed confidence-threshold flips were `seg-large` bird
+`test_image_13.jpg` (`0.503 -> 0.492`) and `seg-2xlarge` person
+`test_image_17.jpg` (`0.424 -> 0.501`). The `seg-xlarge` all-class boundary
+outlier keeps high overlap (`0.9850` IoU, `1.33%` area change).
 
 #### FP16 Compute Unit Latency
 
@@ -349,6 +399,7 @@ scripts/
   test_export.py
   benchmark_latency.py
   benchmark_onnx.py
+  evaluate_top1_mask_quality.py
   scan_fp16_precision.py
   smoke_test.py
   _export_onnx_official.py
@@ -359,8 +410,6 @@ scripts/
 ## Limitations
 
 - FP32 models are larger than FP16 models and do not use the Neural Engine.
-- FP16 accuracy is model/checkpoint-specific. Validate detection outputs,
-  confidence thresholds, and segmentation masks before shipping an FP16 export.
 - Benchmarks are hardware-specific; validate latency and accuracy on your target
   device.
 - Re-run ONNX/Core ML benchmarks after RF-DETR or ONNX Runtime upgrades;
