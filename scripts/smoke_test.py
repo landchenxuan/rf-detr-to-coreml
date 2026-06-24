@@ -87,7 +87,7 @@ def check_documentation_provenance() -> None:
             "The package targets released `coremltools` 9.0 and `rfdetr` 1.8.1.",
             "Numbers below were measured on Apple M5 Pro 18-core, RF-DETR 1.7.1, "
             "coremltools 9.0, and real test images.",
-            "The ONNX benchmark script uses RF-DETR 1.7.1's official ONNX exporter",
+            "The ONNX table below was measured under RF-DETR 1.7.1.",
         ],
         "CHANGELOG.md": [
             "`coremltools==9.0`, `rfdetr==1.8.1`, `torch==2.7.0`, and",

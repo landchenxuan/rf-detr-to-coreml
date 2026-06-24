@@ -269,9 +269,9 @@ python scripts/scan_fp16_precision.py --model nano --output-dir output/fp16-scan
 
 ### Direct Core ML vs ONNX Runtime
 
-The ONNX benchmark script uses RF-DETR 1.7.1's official ONNX exporter in a
-patch-isolated subprocess, then compares ONNX Runtime against this project's
-direct Core ML path.
+The ONNX benchmark script uses the installed RF-DETR official ONNX exporter in
+a patch-isolated subprocess, then compares ONNX Runtime against this project's
+direct Core ML path. The ONNX table below was measured under RF-DETR 1.7.1.
 
 Detection-only ONNX benchmark, same machine and dependency versions as above,
 50 timed runs per backend:
