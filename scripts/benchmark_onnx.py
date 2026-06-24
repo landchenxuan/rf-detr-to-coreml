@@ -10,8 +10,8 @@ Compares four inference paths for RF-DETR detection models:
 
 IMPORTANT: The ONNX model is exported by _export_onnx_official.py in a
 subprocess that does NOT import rfdetr_coreml. That keeps the ONNX benchmark on
-RF-DETR 1.7's official model.export(format="onnx") path while the Direct CoreML
-path still uses this package's patched model.
+the installed RF-DETR official model.export(format="onnx") path while the
+Direct CoreML path still uses this package's patched model.
 
 All paths use the same test image and report latency, max box diff vs PyTorch
 reference, and graph partition count.

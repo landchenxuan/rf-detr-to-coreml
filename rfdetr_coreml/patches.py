@@ -32,7 +32,7 @@ def _ms_deform_attn_core_5d(value, value_spatial_shapes, sampling_locations, att
         value_spatial_shapes: (L, 2) — [(H_0, W_0), ...]
         sampling_locations: (B*H, Len_q, L, P, 2) — 5D
         attention_weights: (B*H, Len_q, L*P)
-        spatial_shapes_hw: optional list of Python-int (H, W) pairs (rfdetr >=1.7).
+        spatial_shapes_hw: optional list of Python-int (H, W) pairs from RF-DETR.
             When provided, used for split/view so concrete ints reach trace.
     Returns:
         (B*H, Len_q, head_dim)
@@ -81,7 +81,7 @@ def _msdeformattn_forward_5d(self, query, reference_points, input_flatten,
     """
     MSDeformAttn.forward with rank ≤ 5 tensors (batch+heads merged).
 
-    ``input_spatial_shapes_hw`` (rfdetr >=1.7) carries Python-int (H, W) pairs
+    ``input_spatial_shapes_hw`` carries Python-int (H, W) pairs
     for trace-friendly split/view; forwarded to the core function.
     """
     N, Len_q, _ = query.shape

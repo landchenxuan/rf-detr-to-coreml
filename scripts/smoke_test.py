@@ -85,14 +85,15 @@ def check_documentation_provenance() -> None:
             "The current tested compatibility baseline is RF-DETR 1.8.1, "
             "Core ML Tools 9.0, and torch 2.7.0.",
             "The package targets released `coremltools` 9.0 and `rfdetr` 1.8.1.",
-            "Numbers below were measured on Apple M5 Pro 18-core, RF-DETR 1.7.1, "
-            "coremltools 9.0, and real test images.",
-            "The ONNX table below was measured under RF-DETR 1.7.1.",
+            "Numbers below were measured on Apple M5 Pro 18-core, RF-DETR 1.8.1, "
+            "coremltools 9.0, torch 2.7.0, torchvision 0.22.0, and real test images.",
+            "The ONNX table below was measured under RF-DETR 1.8.1, "
+            "ONNX 1.22.0, and ONNX Runtime 1.27.0.",
         ],
         "CHANGELOG.md": [
             "`coremltools==9.0`, `rfdetr==1.8.1`, `torch==2.7.0`, and",
-            "Kept the existing latency, diff, FP16, and ONNX benchmark measurements "
-            "labeled as RF-DETR 1.7.1 provenance.",
+            "Refreshed the README latency, diff, FP16, and ONNX benchmark snapshots for "
+            "RF-DETR 1.8.1 on Apple M5 Pro 18-core using real test images.",
         ],
     }
 
@@ -106,6 +107,10 @@ def check_documentation_provenance() -> None:
         "keypoint export",
         "keypoint model",
         "keypoint outputs",
+        "1." "7.1",
+        "1." "7.x",
+        "rfdetr >=1." "7",
+        "rf-detr 1." "7",
     ]
     for filename, text in docs.items():
         lowered = text.lower()

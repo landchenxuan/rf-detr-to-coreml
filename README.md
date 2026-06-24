@@ -171,21 +171,18 @@ post-processing pipeline.
 
 ## Performance And Accuracy Evidence
 
-Numbers below were measured on Apple M5 Pro 18-core, RF-DETR 1.7.1,
-coremltools 9.0, and real test images. Speedup is always relative to PyTorch
-MPS. Diff columns are always relative to the PyTorch reference output, not to
-another Core ML precision target.
+Numbers below were measured on Apple M5 Pro 18-core, RF-DETR 1.8.1,
+coremltools 9.0, torch 2.7.0, torchvision 0.22.0, and real test images.
+Speedup is always relative to PyTorch MPS. Diff columns are always relative to
+the PyTorch reference output, not to another Core ML precision target.
 
 ### Core ML Target Snapshot
 
 Rows group the tested FP32 and FP16 targets by model so the PyTorch MPS
-baseline appears once. FP32 latency was measured with
-`scripts/benchmark_latency.py`; FP32 diff was measured with
-`scripts/test_export.py`. FP16 detection rows use the same target as
-`scripts/test_export.py --precision fp16`, collected with
-`scripts/scan_fp16_precision.py --strategy full_fp16`. FP16 segmentation rows
-were measured with
-`scripts/test_export.py --model segmentation --precision fp16`.
+baseline appears once. The PyTorch MPS column comes from the FP32 latency
+benchmark. FP32 and FP16 latency cells were measured with
+`scripts/benchmark_latency.py --runs 50` using the matching Core ML precision.
+FP32 and FP16 diff cells were measured with `scripts/test_export.py`.
 
 Diff cells, and the detection decision-change cell, use Core ML
 `ComputeUnit.ALL` and the 17 images included in `scripts/test_images`. Core ML
@@ -205,28 +202,28 @@ data, model weights, confidence thresholds, and post-processing pipeline.
 
 | Model | PyTorch MPS | FP32 ALL | FP32 diff | FP16 ALL | FP16 diff | FP16 decision changes |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Nano | 12.1 ms | 8.2 ms (1.5x) | <0.01 px / 0.0003 / - | 4.35 ms (2.8x) | 0.44 px / 0.1035 / 0.0148 | none |
-| Small | 17.7 ms | 13.2 ms (1.3x) | <0.01 px / 0.0010 / - | 5.98 ms (3.0x) | 1.73 px / 0.1219 / 0.0290 | none |
-| Medium | 23.5 ms | 16.9 ms (1.4x) | <0.01 px / 0.0007 / - | 8.51 ms (2.8x) | 3.15 px / 0.3480 / 0.0127 | none |
-| Large | 38.3 ms | 24.9 ms (1.5x) | <0.01 px / 0.0018 / - | 10.19 ms (3.8x) | 1.51 px / 0.2581 / 0.0644 | 1 confidence flip |
+| Nano | 14.1 ms | 9.4 ms (1.5x) | <0.01 px / 0.0003 / - | 4.6 ms (3.1x) | 0.44 px / 0.1035 / 0.0148 | none |
+| Small | 25.5 ms | 14.3 ms (1.8x) | <0.01 px / 0.0010 / - | 6.3 ms (4.0x) | 1.73 px / 0.1219 / 0.0290 | none |
+| Medium | 31.9 ms | 21.0 ms (1.5x) | <0.01 px / 0.0007 / - | 8.2 ms (3.9x) | 3.15 px / 0.3480 / 0.0127 | none |
+| Large | 48.6 ms | 27.8 ms (1.7x) | <0.01 px / 0.0018 / - | 9.8 ms (5.0x) | 1.51 px / 0.2581 / 0.0644 | 1 confidence flip |
 
 #### Segmentation Targets
 
 | Model | PyTorch MPS | FP32 ALL | FP32 diff | FP16 ALL | FP16 diff |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Seg-Nano | 16.6 ms | 12.0 ms (1.4x) | <0.01 px / <0.0001 / 0.0003 | 12.5 ms (1.3x) | 0.59 px / 0.1673 / 0.7748 |
-| Seg-Small | 20.1 ms | 15.9 ms (1.3x) | <0.01 px / 0.0001 / 0.0001 | 13.9 ms (1.4x) | 101.87 px / 8.2739 / 28.4923 |
-| Seg-Medium | 27.9 ms | 21.3 ms (1.3x) | <0.01 px / 0.0004 / 0.0007 | 20.9 ms (1.3x) | 174.02 px / 9.7005 / 96.0324 |
-| Seg-Large | 39.7 ms | 28.2 ms (1.4x) | <0.01 px / 0.0037 / 0.0049 | 26.7 ms (1.5x) | 112.35 px / 5.7367 / 20.0634 |
-| Seg-XLarge | 73.9 ms | 49.9 ms (1.5x) | <0.01 px / 0.0002 / 0.0004 | 47.8 ms (1.5x) | 295.22 px / 7.7803 / 106.7567 |
-| Seg-2XLarge | 135.0 ms | 94.9 ms (1.4x) | 0.54 px / 0.0353 / 0.1695 | 96.8 ms (1.4x) | 635.54 px / 8.1293 / 100.3076 |
+| Seg-Nano | 22.2 ms | 13.1 ms (1.7x) | <0.01 px / <0.0001 / 0.0003 | 6.3 ms (3.5x) | 0.59 px / 0.1673 / 0.7748 |
+| Seg-Small | 28.9 ms | 19.7 ms (1.5x) | <0.01 px / 0.0001 / 0.0001 | 8.2 ms (3.5x) | 101.87 px / 8.2739 / 28.4923 |
+| Seg-Medium | 39.7 ms | 26.0 ms (1.5x) | <0.01 px / 0.0004 / 0.0007 | 11.3 ms (3.5x) | 174.02 px / 9.7005 / 96.0324 |
+| Seg-Large | 57.1 ms | 32.6 ms (1.8x) | <0.01 px / 0.0037 / 0.0049 | 14.4 ms (4.0x) | 112.35 px / 5.7367 / 17.5418 |
+| Seg-XLarge | 94.7 ms | 66.1 ms (1.4x) | <0.01 px / 0.0002 / 0.0004 | 25.7 ms (3.7x) | 295.22 px / 7.7803 / 106.7567 |
+| Seg-2XLarge | 174.7 ms | 144.6 ms (1.2x) | 0.54 px / 0.0353 / 0.1695 | 54.8 ms (3.2x) | 635.54 px / 8.1293 / 100.3076 |
 
 For detection `medium`, one confident query on `test_image_17.jpg` reached
 3.15 px box diff. For detection `large`, one `test_image_17.jpg` query crossed
 the zero-logit confidence boundary while keeping the same class argmax. FP16
-segmentation produced large box and mask deltas in this limited snapshot; treat
-it as investigation evidence unless you introduce a different mixed-precision
-strategy and validate masks on your own data.
+segmentation produced large box, mask, class, and confidence-state deltas in
+this limited snapshot; treat it as investigation evidence unless you introduce
+a different mixed-precision strategy and validate masks on your own data.
 
 #### FP16 Compute Unit Latency
 
@@ -244,21 +241,21 @@ Detection:
 
 | Model | PyTorch MPS | FP16 ALL | FP16 GPU | FP16 NE |
 | --- | ---: | ---: | ---: | ---: |
-| Nano | 13.1 ms | 4.9 ms (2.7x) | 4.0 ms (3.3x) | 7.3 ms (1.8x) |
-| Small | 21.5 ms | 6.3 ms (3.4x) | 6.3 ms (3.4x) | 15.0 ms (1.4x) |
-| Medium | 29.6 ms | 8.1 ms (3.7x) | 7.6 ms (3.9x) | 21.8 ms (1.4x) |
-| Large | 52.2 ms | 10.0 ms (5.2x) | 11.9 ms (4.4x) | 40.5 ms (1.3x) |
+| Nano | 14.3 ms | 4.6 ms (3.1x) | 4.9 ms (2.9x) | 7.1 ms (2.0x) |
+| Small | 25.1 ms | 6.3 ms (4.0x) | 6.2 ms (4.0x) | 15.0 ms (1.7x) |
+| Medium | 31.9 ms | 8.2 ms (3.9x) | 7.5 ms (4.3x) | 21.7 ms (1.5x) |
+| Large | 49.4 ms | 9.8 ms (5.0x) | 11.1 ms (4.5x) | 40.3 ms (1.2x) |
 
 Segmentation:
 
 | Model | PyTorch MPS | FP16 ALL | FP16 GPU | FP16 NE |
 | --- | ---: | ---: | ---: | ---: |
-| Seg-Nano | 17.8 ms | 7.1 ms (2.5x) | 6.4 ms (2.8x) | 13.9 ms (1.3x) |
-| Seg-Small | 24.4 ms | 11.9 ms (2.1x) | 9.7 ms (2.5x) | 17.3 ms (1.4x) |
-| Seg-Medium | 44.9 ms | 11.2 ms (4.0x) | 16.0 ms (2.8x) | 25.8 ms (1.7x) |
-| Seg-Large | 78.2 ms | 21.4 ms (3.7x) | 24.5 ms (3.2x) | 48.2 ms (1.6x) |
-| Seg-XLarge | 137.9 ms | 33.6 ms (4.1x) | 37.9 ms (3.6x) | 119.0 ms (1.2x) |
-| Seg-2XLarge | 259.3 ms | 91.8 ms (2.8x) | 96.1 ms (2.7x) | 284.8 ms (0.9x) |
+| Seg-Nano | 22.3 ms | 6.3 ms (3.5x) | 6.5 ms (3.4x) | 13.9 ms (1.6x) |
+| Seg-Small | 30.2 ms | 8.2 ms (3.7x) | 8.1 ms (3.7x) | 17.1 ms (1.8x) |
+| Seg-Medium | 40.3 ms | 11.3 ms (3.6x) | 10.2 ms (4.0x) | 26.0 ms (1.6x) |
+| Seg-Large | 54.1 ms | 14.4 ms (3.8x) | 14.7 ms (3.7x) | 39.9 ms (1.4x) |
+| Seg-XLarge | 93.2 ms | 25.7 ms (3.6x) | 22.6 ms (4.1x) | 102.4 ms (0.9x) |
+| Seg-2XLarge | 163.8 ms | 54.8 ms (3.0x) | 53.6 ms (3.1x) | 237.6 ms (0.7x) |
 
 To explore partial FP16 conversion instead of validating a final target, run the
 mixed-precision scan harness:
@@ -271,17 +268,18 @@ python scripts/scan_fp16_precision.py --model nano --output-dir output/fp16-scan
 
 The ONNX benchmark script uses the installed RF-DETR official ONNX exporter in
 a patch-isolated subprocess, then compares ONNX Runtime against this project's
-direct Core ML path. The ONNX table below was measured under RF-DETR 1.7.1.
+direct Core ML path. The ONNX table below was measured under RF-DETR 1.8.1,
+ONNX 1.22.0, and ONNX Runtime 1.27.0.
 
 Detection-only ONNX benchmark, same machine and dependency versions as above,
 50 timed runs per backend:
 
 | Model | ONNX CPU | ONNX CoreML EP NN FP16 | ONNX CoreML EP MLProgram FP32 ALL | Direct Core ML FP32 ALL | Box diff range |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Nano | 35.1 ms | 54.5 ms | 16.0 ms | 8.2 ms | 0.00-0.12 px |
-| Small | 64.1 ms | 103.8 ms | 23.6 ms | 13.2 ms | 0.00-0.16 px |
-| Medium | 79.5 ms | 146.3 ms | 30.7 ms | 16.9 ms | 0.00-0.11 px |
-| Large | 138.2 ms | 233.8 ms | 41.8 ms | 24.9 ms | 0.00-0.21 px |
+| Nano | 48.0 ms | 59.5 ms | 14.8 ms | 9.5 ms | 0.00-0.07 px |
+| Small | 78.3 ms | 109.3 ms | 24.6 ms | 16.3 ms | 0.00-0.09 px |
+| Medium | 103.0 ms | 154.6 ms | 38.6 ms | 18.9 ms | 0.00-0.15 px |
+| Large | 169.5 ms | 246.6 ms | 45.8 ms | 30.0 ms | 0.00-0.14 px |
 
 The box diff range is measured in pixels over confident PyTorch reference
 queries. ONNX rows compare against RF-DETR's official PyTorch export reference;
@@ -364,8 +362,8 @@ scripts/
   confidence thresholds, and segmentation masks before shipping an FP16 export.
 - Benchmarks are hardware-specific; validate latency and accuracy on your target
   device.
-- Re-run ONNX/Core ML benchmarks after RF-DETR or ONNX Runtime upgrades; the
-  upstream RF-DETR export path changed substantially in the 1.7 line.
+- Re-run ONNX/Core ML benchmarks after RF-DETR or ONNX Runtime upgrades;
+  upstream export paths can change across releases.
 - Some patches can be removed when released `coremltools` and `rfdetr` versions
   cover the same behavior upstream.
 
