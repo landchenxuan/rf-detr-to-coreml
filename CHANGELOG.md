@@ -16,6 +16,7 @@ All notable changes to this project are recorded here.
 - Removed deprecated upstream variants from the supported model registry.
 - Refreshed the README latency, diff, FP16, and ONNX benchmark snapshots for
   RF-DETR 1.8.1 on Apple M5 Pro 18-core using real test images.
+- Added pinned ONNX benchmark reproduction dependencies to `requirements.txt`.
 - Added a README ONNX detection benchmark table and aligned ONNX benchmark box
   diffs with the confident-query accuracy checks used by `test_export.py`.
 - Updated FP16 guidance from raw-query diffing to detection-oriented equivalence:

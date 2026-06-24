@@ -32,7 +32,8 @@ pip install -e .
 ```
 
 Python 3.10 or newer is required. The package depends on `torch`,
-`coremltools`, and `rfdetr`.
+`coremltools`, and `rfdetr`; the benchmark baseline also pins `onnx` and
+`onnxruntime`.
 
 For a known baseline environment:
 
