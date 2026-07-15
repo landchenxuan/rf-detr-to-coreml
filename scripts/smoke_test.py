@@ -67,7 +67,7 @@ def check_versions() -> None:
     }
     print("dependency versions:", versions)
     assert versions["coremltools"] == "9.0", versions
-    assert versions["rfdetr"] == "1.8.1", versions
+    assert versions["rfdetr"] == "1.8.3", versions
     assert versions["torch"] == "2.7.0", versions
     assert versions["torchvision"] == "0.22.0", versions
 
