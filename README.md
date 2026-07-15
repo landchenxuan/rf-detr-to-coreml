@@ -8,7 +8,7 @@ and applies a small runtime patch overlay for RF-DETR/coremltools conversion
 gaps. The conservative production path is FP32 Core ML running on Apple GPU.
 FP16 ML Program export is available; current precision evidence is summarized in
 [Benchmark Snapshot](#benchmark-snapshot).
-The current tested compatibility baseline is RF-DETR 1.8.1, Core ML Tools 9.0,
+The current tested compatibility baseline is RF-DETR 1.8.3, Core ML Tools 9.0,
 and torch 2.7.0.
 
 ## Should You Use This?
@@ -32,9 +32,9 @@ cd rf-detr-to-coreml
 pip install -e .
 ```
 
-Python 3.10 or newer is required. The package depends on `torch`,
-`coremltools`, and `rfdetr`; the benchmark baseline also pins `onnx` and
-`onnxruntime`.
+Python 3.10 or newer is required for the package. The package depends on
+`torch`, `coremltools`, and `rfdetr`; the pinned benchmark baseline also
+includes `onnx` and `onnxruntime` and requires Python 3.11 or newer.
 
 For a known baseline environment:
 
@@ -67,7 +67,7 @@ weights, FP16 exports, larger batches, or exporting every variant.
 | `--weights` | None | Path to fine-tuned `.pth` weights |
 | `--batch-size` | `1` | `1` uses Core ML `ImageType`; larger batches use `TensorType` NCHW float32 input in `[0, 1]` |
 
-The package targets released `coremltools` 9.0 and `rfdetr` 1.8.1. Deprecated
+The package targets released `coremltools` 9.0 and `rfdetr` 1.8.3. Deprecated
 variants such as `base` and `seg-preview` are not supported.
 
 For measured FP32 and FP16 target deltas, see

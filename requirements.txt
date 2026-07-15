@@ -2,10 +2,11 @@
 #
 # This stack targets released packages only. Torch stays at 2.7.0 because
 # coremltools 9.0 marks it as the newest tested Torch version.
+# The exact SciPy and ONNX Runtime pins require Python 3.11 or newer.
 torch==2.7.0
 torchvision==0.22.0
 coremltools==9.0
-rfdetr==1.8.1
+rfdetr==1.8.3
 scipy==1.17.1
 
 # ONNX benchmark reproduction.
