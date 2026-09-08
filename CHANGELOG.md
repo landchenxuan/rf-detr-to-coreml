@@ -2,15 +2,15 @@
 
 All notable changes to this project are recorded here.
 
-## Unreleased
+## 1.10.1 - 2026-09-08
 
 ### Changed
 
-- Target released PyPI packages for the compatibility baseline:
-  `coremltools==9.0`, `rfdetr==1.8.3`, `torch==2.7.0`, and
-  `torchvision==0.22.0`.
+- Upgrade the compatibility baseline to `rfdetr==1.10.1`, `scipy==1.18.1`,
+  and `onnxruntime==1.29.0`, with `coremltools==9.0`, `torch==2.7.0`,
+  and `torchvision==0.22.0`.
 - Clarified that the package supports Python 3.10 while the exact benchmark
-  dependency pins require Python 3.11 or newer.
+  dependency pins require Python 3.12 or newer.
 - Simplified the README around install, export, verification, production notes,
   and the patch overlay.
 - Updated export documentation for RF-DETR's official ONNX/TFLite paths and
