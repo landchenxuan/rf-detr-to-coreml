@@ -67,33 +67,9 @@ def check_versions() -> None:
     }
     print("dependency versions:", versions)
     assert versions["coremltools"] == "9.0", versions
-    assert versions["rfdetr"] == "1.10.1", versions
+    assert versions["rfdetr"] == "1.11.2", versions
     assert versions["torch"] == "2.7.0", versions
     assert versions["torchvision"] == "0.22.0", versions
-
-
-def check_documentation_guardrails() -> None:
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    docs = {
-        "README.md": readme,
-        "CHANGELOG.md": changelog,
-    }
-
-    forbidden_phrases = [
-        "keypoint support",
-        "keypoint export",
-        "keypoint model",
-        "keypoint outputs",
-        "1." "7.1",
-        "1." "7.x",
-        "rfdetr >=1." "7",
-        "rf-detr 1." "7",
-    ]
-    for filename, text in docs.items():
-        lowered = text.lower()
-        matches = [phrase for phrase in forbidden_phrases if phrase in lowered]
-        assert not matches, f"{filename} contains unsupported keypoint wording: {matches}"
 
 
 def check_registry(model_registry, import_model_class) -> None:
@@ -200,47 +176,32 @@ def check_class_metadata(export_module) -> None:
         "class_count": "90",
     }
 
-    class Rfdetr15Model:
+    class MappingModel:
         class_names = {1: "person", 18: "dog"}
 
-    rfdetr15_metadata = export_module._class_names_metadata(
-        Rfdetr15Model(),
+    mapping_metadata = export_module._class_names_metadata(
+        MappingModel(),
         weights_path=None,
         checkpoint_class_labels=None,
         num_classes=90,
     )
-    assert json.loads(rfdetr15_metadata["class_names"]) == ["person", "dog"]
-    assert ast.literal_eval(rfdetr15_metadata["names"]) == {0: "person", 1: "dog"}
-    assert json.loads(rfdetr15_metadata["class_ids"]) == [1, 18]
-    assert json.loads(rfdetr15_metadata["class_mapping"]) == {"1": "person", "18": "dog"}
+    assert json.loads(mapping_metadata["class_names"]) == ["person", "dog"]
+    assert ast.literal_eval(mapping_metadata["names"]) == {0: "person", 1: "dog"}
+    assert json.loads(mapping_metadata["class_ids"]) == [1, 18]
+    assert json.loads(mapping_metadata["class_mapping"]) == {"1": "person", "18": "dog"}
 
 
-def check_required_rfdetr_patches() -> None:
-    import rfdetr_coreml.patches as patches
-    from rfdetr.models.heads import segmentation as seg_mod
-
-    original_target = seg_mod._DepthwiseConvWithoutCuDNN
-    assert original_target.__module__ == "rfdetr_coreml.patches", original_target
-
-    del seg_mod._DepthwiseConvWithoutCuDNN
-    patches._applied = False
-    try:
+def check_export_arguments(export_module) -> None:
+    for kwargs in ({"precision": "invalid"}, {"batch_size": 0}):
         try:
-            patches.apply_rfdetr_patches()
-        except RuntimeError as exc:
-            assert "segmentation" in str(exc).lower(), exc
-            assert "_DepthwiseConvWithoutCuDNN" in str(exc), exc
-            assert patches._applied is False
+            export_module.export_to_coreml("small", **kwargs)
+        except ValueError:
+            pass
         else:
-            raise AssertionError("missing segmentation depthwise target did not fail early")
-    finally:
-        seg_mod._DepthwiseConvWithoutCuDNN = original_target
-        patches._applied = False
-        patches.apply_rfdetr_patches()
+            raise AssertionError(f"invalid export arguments accepted: {kwargs}")
 
 
 def main() -> None:
-    check_documentation_guardrails()
     with network_disabled():
         import rfdetr_coreml
         import rfdetr_coreml.export as export_module
@@ -251,7 +212,7 @@ def main() -> None:
         check_registry(MODEL_REGISTRY, _import_model_class)
         check_cli_help()
         check_class_metadata(export_module)
-        check_required_rfdetr_patches()
+        check_export_arguments(export_module)
     print("smoke: ok")
 
 

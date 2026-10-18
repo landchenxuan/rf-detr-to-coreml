@@ -1,4 +1,4 @@
-name: No-download Smoke
+name: Adapter Tests
 
 on:
   pull_request:
@@ -34,3 +34,6 @@ jobs:
         run: |
           python -m compileall -q rfdetr_coreml scripts
           python scripts/smoke_test.py
+
+      - name: Test image and metadata adapter through Core ML
+        run: python scripts/test_adapter.py
