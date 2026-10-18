@@ -2,6 +2,15 @@
 
 All notable changes to this project are recorded here.
 
+## Unreleased
+
+- Upgrade RF-DETR to 1.11.2 and use its official Core ML exporter.
+- Retain image inputs, in-graph normalization, fixed-batch tensor inputs,
+  output naming, custom weights and class metadata.
+- Remove the independent TorchScript conversion path, global compatibility
+  patches, upstream-model benchmarks and precision-scan experiments.
+- Keep focused adapter smoke and real Core ML input/metadata tests.
+
 ## 1.10.1 - 2026-09-08
 
 ### Changed

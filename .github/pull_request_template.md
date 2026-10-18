@@ -1,14 +1,9 @@
 ## Summary
 
-- Describe the change.
+Describe the adapter change.
 
 ## Validation
 
-- [ ] Import or CLI smoke test
-- [ ] Core ML export smoke test
-- [ ] Core ML vs PyTorch parity test
-- [ ] Not applicable
-
-## Notes
-
-- None.
+- [ ] CLI and metadata smoke checks
+- [ ] Real Core ML image/normalization/batch adapter tests
+- [ ] Not applicable (explain why)

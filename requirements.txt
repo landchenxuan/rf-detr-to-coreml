@@ -1,14 +1,5 @@
-# RF-DETR CoreML Export Tool - compatibility smoke baseline.
-#
-# This stack targets released packages only. Torch stays at 2.7.0 because
-# coremltools 9.0 marks it as the newest tested Torch version.
-# The pinned SciPy version requires Python 3.12 or newer.
+# Tested adapter environment. RF-DETR owns the model/export dependencies.
 torch==2.7.0
 torchvision==0.22.0
 coremltools==9.0
-rfdetr==1.10.1
-scipy==1.18.1
-
-# ONNX benchmark reproduction.
-onnx==1.22.0
-onnxruntime==1.29.0
+rfdetr[coreml]==1.11.2

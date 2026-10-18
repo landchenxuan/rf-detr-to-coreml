@@ -14,7 +14,6 @@ import logging
 import sys
 import time
 
-# Apply patches before any rfdetr imports
 import rfdetr_coreml  # noqa: F401
 
 from rfdetr_coreml.export import MODEL_REGISTRY, export_to_coreml

@@ -3,7 +3,7 @@ CoreML export logic for RF-DETR models.
 
 Provides NormalizedWrapper (embeds ImageNet normalization) and
 export_to_coreml() which handles the full pipeline:
-  model instantiation → export mode → trace → ct.convert → save
+  model instantiation → upstream preparation/conversion → metadata → save
 """
 
 import json
@@ -12,9 +12,10 @@ import os
 import time
 from collections.abc import Mapping
 from copy import deepcopy
+from dataclasses import replace
 from importlib import metadata as importlib_metadata
+from pathlib import Path
 
-import numpy as np
 import torch
 import torch.nn as nn
 
@@ -178,18 +179,7 @@ def _class_names_metadata(
             metadata["class_count"] = str(num_classes)
         return metadata
 
-    try:
-        from rfdetr.assets.coco_classes import COCO_CLASSES, COCO_CLASS_NAMES
-    except ImportError:
-        try:
-            from rfdetr.util.coco_classes import COCO_CLASSES
-        except ImportError:
-            COCO_CLASSES = {}
-        if isinstance(COCO_CLASSES, Mapping):
-            COCO_CLASS_NAMES = [name for _, name in sorted(COCO_CLASSES.items())]
-        else:
-            COCO_CLASSES = {}
-            COCO_CLASS_NAMES = []
+    from rfdetr.assets.coco_classes import COCO_CLASSES, COCO_CLASS_NAMES
 
     if class_names == list(COCO_CLASS_NAMES):
         return _class_names_to_metadata(class_names, COCO_CLASSES.keys(), "coco")
@@ -197,6 +187,22 @@ def _class_names_metadata(
         return _class_names_to_metadata(class_names, class_ids, "model")
 
     return _class_names_to_metadata(class_names, range(len(class_names)), "model")
+
+
+def _prepare_image_graph(rfdetr_model, resolution: int, batch_size: int = 1):
+    """Use upstream graph preparation, then add only our input normalization."""
+    from rfdetr.export._backend import _switch_to_export_mode
+    from rfdetr.export.prepare import prepare_export_graph
+
+    graph = prepare_export_graph(
+        deepcopy(rfdetr_model.model.model).cpu().eval(),
+        rfdetr_model.model_config,
+        shape=(resolution, resolution),
+        device="cpu",
+        batch_size=batch_size,
+    )
+    _switch_to_export_mode(graph.model)
+    return replace(graph, model=NormalizedWrapper(graph.model, resolution).eval())
 
 
 def export_to_coreml(
@@ -219,16 +225,16 @@ def export_to_coreml(
         weights_path: Path to custom .pth weights (fine-tuned model).
                       If None, downloads pre-trained COCO weights.
         batch_size: Batch size for the exported model (default 1).
-                    batch=1 uses ct.ImageType (accepts 0-255 uint8 or 0-1 float).
+                    batch=1 uses ct.ImageType (accepts RGB image pixels).
                     batch>1 uses ct.TensorType (accepts 0-1 float32 NCHW).
 
     Returns:
         Path to the saved .mlpackage directory.
     """
-    import coremltools as ct
-
     if model_name not in MODEL_REGISTRY:
         raise ValueError(f"Unknown model: {model_name}. Choose from {list(MODEL_REGISTRY.keys())}")
+    if precision not in {"fp32", "fp16"}:
+        raise ValueError(f"Unknown precision: {precision}. Choose fp32 or fp16")
     if batch_size < 1:
         raise ValueError(f"batch_size must be >= 1, got {batch_size}")
 
@@ -282,83 +288,37 @@ def export_to_coreml(
 
     logger.info(f"Model instantiated in {time.time() - t0:.1f}s")
 
-    # Step 2: Deep copy the inner PyTorch model, move to CPU, eval mode
-    t0 = time.time()
-    model = deepcopy(rfdetr_model.model.model)
-    model = model.cpu().eval()
+    # Upstream owns attention preparation, torch.export, op coverage and conversion.
+    # Our adapter only adds the existing pixel input contract to that pipeline.
+    from rfdetr.export._coreml.exporter import CoreMLConfig
+    from rfdetr_coreml._official import ImageCoreMLExporter
 
-    # Step 3: Switch to export mode (forward → forward_export, cascades to submodules)
-    model.export()
-
-    # Step 4: Wrap with normalization
-    wrapped = NormalizedWrapper(model, resolution)
-    wrapped.eval()
-    logger.info(f"Model prepared in {time.time() - t0:.1f}s")
-
-    # Step 5: Trace with dummy input
-    t0 = time.time()
-    dummy = torch.rand(batch_size, 3, resolution, resolution)
-    with torch.no_grad():
-        traced = torch.jit.trace(wrapped, dummy)
-    logger.info(f"Traced in {time.time() - t0:.1f}s")
-
-    # Step 6: Convert to CoreML
-    t0 = time.time()
-    compute_precision = ct.precision.FLOAT16 if precision == "fp16" else ct.precision.FLOAT32
-
-    if precision == "fp16":
-        logger.warning(
-            "FP16 can change model outputs. Validate this model/checkpoint "
-            "with scripts/test_export.py --precision fp16 before shipping it. "
-            "Use scripts/scan_fp16_precision.py for mixed-precision experiments."
-        )
-
-    if batch_size == 1:
-        inputs = [ct.ImageType(name="image", shape=(1, 3, resolution, resolution), scale=1.0 / 255.0)]
-    else:
-        inputs = [ct.TensorType(
-            name="image",
-            shape=(batch_size, 3, resolution, resolution),
-            dtype=np.float32,
-        )]
-
-    mlmodel = ct.convert(
-        traced,
-        inputs=inputs,
-        convert_to="mlprogram",
-        compute_precision=compute_precision,
-        minimum_deployment_target=ct.target.iOS16,
-    )
-
-    # Add metadata
-    rfdetr_version = _package_version("rfdetr")
-    coremltools_version = _package_version("coremltools")
-    mlmodel.author = "rfdetr_coreml"
-    mlmodel.short_description = f"RF-DETR {model_name} ({precision.upper()}{batch_desc}) — {resolution}x{resolution}"
-    mlmodel.version = rfdetr_version
-    mlmodel.user_defined_metadata["rfdetr_version"] = rfdetr_version
-    mlmodel.user_defined_metadata["coremltools_version"] = coremltools_version
-    mlmodel.user_defined_metadata["model_variant"] = model_name
-    mlmodel.user_defined_metadata["precision"] = precision
-    mlmodel.user_defined_metadata.update(_class_names_metadata(
-        rfdetr_model,
-        weights_path=weights_path,
-        checkpoint_class_labels=checkpoint_class_labels,
-        num_classes=num_classes,
-    ))
-
-    logger.info(f"Converted in {time.time() - t0:.1f}s")
-
-    # Step 7: Save
-    os.makedirs(output_dir, exist_ok=True)
-    suffix = ""
-    if weights_path:
-        stem = os.path.splitext(os.path.basename(weights_path))[0]
-        suffix = f"-{stem}"
+    graph = _prepare_image_graph(rfdetr_model, resolution, batch_size)
+    suffix = f"-{Path(weights_path).stem}" if weights_path else ""
     batch_tag = f"-batch{batch_size}" if batch_size > 1 else ""
-    filename = f"rf-detr-{model_name}{suffix}-{precision}{batch_tag}.mlpackage"
-    output_path = os.path.join(output_dir, filename)
-    mlmodel.save(output_path)
+    filename = f"rf-detr-{model_name}{suffix}-{precision}{batch_tag}"
+    metadata = {
+        "rfdetr_version": _package_version("rfdetr"),
+        "coremltools_version": _package_version("coremltools"),
+        "model_variant": model_name,
+        "precision": precision,
+        **_class_names_metadata(
+            rfdetr_model,
+            weights_path=weights_path,
+            checkpoint_class_labels=checkpoint_class_labels,
+            num_classes=num_classes,
+        ),
+    }
+    exporter = ImageCoreMLExporter(
+        CoreMLConfig(
+            output_dir=Path(output_dir),
+            output_name=filename,
+            compute_precision="float16" if precision == "fp16" else "float32",
+        ),
+        metadata=metadata,
+        description=f"RF-DETR {model_name} ({precision.upper()}{batch_desc}) — {resolution}x{resolution}",
+    )
+    output_path = exporter(graph)
 
     # Report size
     total_size = 0
@@ -368,4 +328,4 @@ def export_to_coreml(
     size_mb = total_size / (1024 * 1024)
     logger.info(f"Saved to {output_path} ({size_mb:.1f} MB)")
 
-    return output_path
+    return str(output_path)
