@@ -9,7 +9,7 @@ on:
 
 jobs:
   smoke:
-    name: Python adapter checks
+    name: Python no-download smoke
     runs-on: macos-14
 
     steps:
