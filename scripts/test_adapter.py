@@ -3,18 +3,18 @@
 
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock, patch
 
 import coremltools as ct
 import numpy as np
 from PIL import Image
 import torch
 from torch import nn
-from rfdetr.export._coreml.exporter import CoreMLConfig
 from rfdetr.export.prepare import ExportGraph
 
-from rfdetr_coreml._official import ImageCoreMLExporter
-from rfdetr_coreml.export import NormalizedWrapper, _class_names_to_metadata
+from rfdetr_coreml.export import NormalizedWrapper, export_to_coreml, _class_names_to_metadata
 
 
 class AdapterTests(unittest.TestCase):
@@ -38,14 +38,26 @@ class AdapterTests(unittest.TestCase):
         )
         metadata = {
             "rfdetr_version": "1.11.2",
+            "coremltools_version": "9.0",
+            "model_variant": "small",
+            "precision": precision,
             **_class_names_to_metadata(["cat", "bird"], [0, 1], "checkpoint"),
         }
         with TemporaryDirectory() as directory:
-            exporter = ImageCoreMLExporter(
-                CoreMLConfig(output_dir=Path(directory), output_name="adapter", compute_precision=precision),
-                metadata=metadata, description="Image adapter test",
-            )
-            path = exporter(graph)
+            checkpoint = Path(directory) / "checkpoint.best.pth"
+            torch.save({"model": {}, "class_names": ["cat", "bird"]}, checkpoint)
+            fake_model = SimpleNamespace(model=SimpleNamespace(
+                model=nn.Identity(), args=SimpleNamespace(num_classes=2),
+            ))
+            # Replace only the RF-DETR weights/preparation. The public adapter,
+            # official exporter, naming, package save/load and prediction are real.
+            with patch("rfdetr_coreml.export._import_model_class", return_value=Mock(return_value=fake_model)), \
+                 patch("rfdetr_coreml.export._prepare_image_graph", return_value=graph):
+                path = export_to_coreml(
+                    "small", directory, precision, weights_path=str(checkpoint), batch_size=batch_size,
+                )
+            batch_tag = f"-batch{batch_size}" if batch_size > 1 else ""
+            self.assertEqual(Path(path).name, f"rf-detr-small-checkpoint.best-{precision}{batch_tag}.mlpackage")
             model = ct.models.MLModel(str(path), compute_units=ct.ComputeUnit.CPU_ONLY)
             spec = model.get_spec()
             inp = spec.description.input[0]
@@ -53,7 +65,7 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(inp.type.WhichOneof("Type"), "imageType" if batch_size == 1 else "multiArrayType")
             self.assertEqual({k: model.user_defined_metadata[k] for k in metadata}, metadata)
             self.assertEqual(model.author, "rfdetr_coreml")
-            self.assertEqual(model.short_description, "Image adapter test")
+            self.assertIn("RF-DETR small", model.short_description)
             if batch_size == 1:
                 self.assertEqual((inp.type.imageType.width, inp.type.imageType.height), (2, 2))
                 data = Image.fromarray(pixels)
@@ -62,17 +74,17 @@ class AdapterTests(unittest.TestCase):
                 data = raw
             result = model.predict({"image": data})
             actual = result[spec.description.output[0].name]
-            tolerance = 0.005 if precision == "float16" else 1e-5
+            tolerance = 0.005 if precision == "fp16" else 1e-5
             np.testing.assert_allclose(actual, expected, atol=tolerance, rtol=tolerance)
 
     def test_image_fp32(self):
-        self.check_export(1, "float32")
+        self.check_export(1, "fp32")
 
     def test_image_fp16(self):
-        self.check_export(1, "float16")
+        self.check_export(1, "fp16")
 
     def test_batch_tensor(self):
-        self.check_export(2, "float32")
+        self.check_export(2, "fp32")
 
 
 if __name__ == "__main__":

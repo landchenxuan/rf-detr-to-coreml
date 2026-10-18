@@ -312,7 +312,8 @@ def export_to_coreml(
     exporter = ImageCoreMLExporter(
         CoreMLConfig(
             output_dir=Path(output_dir),
-            output_name=filename,
+            # Upstream removes the final suffix; protect dots in checkpoint stems.
+            output_name=f"{filename}.mlpackage",
             compute_precision="float16" if precision == "fp16" else "float32",
         ),
         metadata=metadata,
