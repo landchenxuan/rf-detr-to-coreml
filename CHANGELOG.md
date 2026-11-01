@@ -2,7 +2,17 @@
 
 All notable changes to this project are recorded here.
 
-## Unreleased
+## 1.11.2.post1 - 2026-11-01
+
+### Fixed
+
+- FP16 exports keep the two-stage query-selection `topk` in FP32. On the GPU an
+  FP16 `topk` gave every batch element after the first a different query
+  selection than the same image gets at batch 1 (RF-DETR Small, Apple M5 Pro:
+  identical images in both slots of a batch-2 call differed on 376 of 377
+  photos). Batch-1 FP16 outputs are unchanged, and the cost is not measurable.
+
+## 1.11.2 - 2026-10-19
 
 - Upgrade RF-DETR to 1.11.2 and use its official Core ML exporter.
 - Retain image inputs, in-graph normalization, fixed-batch tensor inputs,

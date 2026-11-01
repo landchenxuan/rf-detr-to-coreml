@@ -21,6 +21,13 @@ class ImageCoreMLExporter(CoreMLExporter):
         self.description = description
 
     def _build_mlmodel(self, graph, compute_precision, api):
+        if compute_precision == ct.precision.FLOAT16:
+            # On the GPU, an FP16 topk gives each batch element after the first a
+            # different selection than the same input gets at batch 1. Keeping only
+            # the query-selection topk in FP32 leaves batch-1 outputs unchanged.
+            compute_precision = ct.transform.FP16ComputePrecision(
+                op_selector=lambda op: op.op_type != "topk",
+            )
         shape = tuple(graph.input_tensors.shape)
         if shape[0] == 1:
             image_input = ct.ImageType(name="image", shape=shape, scale=1.0 / 255.0)

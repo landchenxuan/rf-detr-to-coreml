@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "rfdetr-coreml"
-version = "1.11.2"
+version = "1.11.2.post1"
 description = "Image inputs, graph normalization and class metadata for RF-DETR official Core ML export"
 readme = "README.md"
 license = "Apache-2.0"

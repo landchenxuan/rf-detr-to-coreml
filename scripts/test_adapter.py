@@ -86,6 +86,32 @@ class AdapterTests(unittest.TestCase):
     def test_batch_tensor(self):
         self.check_export(2, "fp32")
 
+    def test_fp16_keeps_topk_in_fp32(self):
+        class TopK(nn.Module):
+            def forward(self, x):
+                scores = x.flatten(2).amax(1)
+                return torch.topk(scores, 3, dim=1)[1]
+
+        raw = torch.rand(2, 3, 4, 4)
+        graph = ExportGraph(
+            model=NormalizedWrapper(TopK(), 4).eval(), input_tensors=raw, input_names=("input",),
+            output_names=("indices",), dynamic_axes=None, shape=(4, 4), backbone_only=False,
+        )
+        fake_model = SimpleNamespace(model=SimpleNamespace(model=nn.Identity(), args=SimpleNamespace(num_classes=1)))
+        with TemporaryDirectory() as directory:
+            with patch("rfdetr_coreml.export._import_model_class", return_value=Mock(return_value=fake_model)), \
+                 patch("rfdetr_coreml.export._prepare_image_graph", return_value=graph), \
+                 patch("rfdetr_coreml.export._class_names_metadata", return_value={}):
+                path = export_to_coreml("small", directory, "fp16", batch_size=2)
+            spec = ct.models.MLModel(str(path), skip_model_load=True).get_spec()
+        ops = [op for block in spec.mlProgram.functions["main"].block_specializations.values()
+               for op in block.operations]
+        topk = [op for op in ops if op.type == "topk"]
+        self.assertEqual(len(topk), 1)
+        fp32 = ct.proto.MIL_pb2.DataType.Value("FLOAT32")
+        self.assertEqual(topk[0].outputs[0].type.tensorType.dataType, fp32)
+        self.assertTrue(any(op.type == "cast" for op in ops))
+
 
 if __name__ == "__main__":
     unittest.main()
