@@ -30,6 +30,8 @@ rfdetr-coreml --model small --batch-size 2
 Default: `nano`, FP32, batch 1, upstream COCO weights, `output/` directory.
 Use `--help` for model choices and `--model all` to export every registered
 variant. FP16 is optional; validate it on your own images and target device.
+FP16 exports keep the query-selection `topk` in FP32, because an FP16 `topk`
+on the GPU gives later batch elements different results than the first.
 
 ```python
 from rfdetr_coreml import export_to_coreml
